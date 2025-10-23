@@ -1,0 +1,22 @@
+services:
+  api:
+    build: .
+    container_name: vmeste-api
+    env_file:
+      - .env
+    ports:
+      - "${API_PORT:-8000}:8000"
+    depends_on:
+      - chroma
+
+  chroma:
+    image: ghcr.io/chroma-core/chroma:latest
+    container_name: vmeste-chroma
+    restart: unless-stopped
+    ports:
+      - "${CHROMA_PORT:-8001}:8000"
+    volumes:
+      - chroma_data:/chroma/.chroma
+
+volumes:
+  chroma_data:

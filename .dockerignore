@@ -1,0 +1,17 @@
+# Python caches
+__pycache__/
+*.py[cod]
+
+# Environment
+.env
+.env.*
+.venv/
+venv/
+
+# Repo metadata
+.git
+.gitignore
+Legacy/
+
+# Local files
+.DS_Store
