@@ -24,6 +24,11 @@
 
 ### Структура БД (v0)
 - `sources` — реестр исходных материалов (тип, ссылка, метаданные, soft delete)
+- `documents` — тексты после транскрибации, связаны с источниками
+- `content_chunks` — рабочие фрагменты для RAG с темами, TOV и метаданными
+- `chunk_embeddings_meta` — связь чанков с коллекциями Chroma и статус синхронизации
+- `psychologist_content` — каталог платных материалов (описание, цена, теги)
+- `style_examples` — эталонные Q/A для поддержания тона общения
 - `users` — карточка пользователя и профиль intake (JSONB)
 - `sessions` — сессии диалога: режим (`intake`, `consultation`, `support`), статус, состояние LangGraph
 - `chat_history` — все сообщения в рамках сессий, с метками качества (`expert_score`, `user_score`)
@@ -37,7 +42,7 @@
 - `docker-compose.yml` — сервисы API, Chroma и PostgreSQL
 - `Dockerfile` — сборка контейнера API
 - `.env.example` — шаблон переменных окружения
-- `db/init.sql` — схема пользовательских таблиц в PostgreSQL
+- `db/init.sql` — схема таблиц пользователей и контента в PostgreSQL
 - `Legacy/` — исходные материалы проекта (не попадает в репозиторий)
 
 Дальше планируется реализация LangGraph workflow, расширение схемы данными контента и интеграция с YandexGPT.

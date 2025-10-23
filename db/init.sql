@@ -106,3 +106,133 @@ CREATE TABLE IF NOT EXISTS user_memory (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Документы после транскрибации/нормализации.
+CREATE TABLE IF NOT EXISTS documents (
+    -- PK документа.
+    doc_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    -- FK → sources.source_id: из какого источника получен документ.
+    source_id UUID NOT NULL REFERENCES sources(source_id),
+    -- Полный очищенный текст.
+    raw_text TEXT NOT NULL,
+    -- Путь к исходному файлу или объекту в сторидже (может быть NULL).
+    storage_path TEXT NULL,
+    -- Статус обработки: raw / cleaned / ready и т.д.
+    status TEXT NOT NULL,
+    -- Дополнительные метаданные (инструмент обработки, номер части и т.п.).
+    meta JSONB NOT NULL DEFAULT '{}'::JSONB,
+    -- Контроль дубликатов (например, SHA256 от текста).
+    checksum TEXT NULL,
+    -- Таймстемпы и soft delete.
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    is_deleted BOOLEAN NOT NULL DEFAULT FALSE
+);
+
+CREATE INDEX IF NOT EXISTS documents_source_id_idx ON documents(source_id);
+CREATE UNIQUE INDEX IF NOT EXISTS documents_checksum_idx
+    ON documents(checksum) WHERE checksum IS NOT NULL;
+
+-- Чанки контента, используемые в RAG.
+CREATE TABLE IF NOT EXISTS content_chunks (
+    -- PK чанка.
+    chunk_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    -- FK → documents.doc_id: из какого документа нарезан чанк.
+    doc_id UUID NOT NULL REFERENCES documents(doc_id),
+    -- Порядковый номер внутри документа.
+    sequence INTEGER NOT NULL,
+    -- Основной текст чанка.
+    text TEXT NOT NULL,
+    -- Краткая выжимка.
+    summary TEXT NULL,
+    -- Определённая тема и уверенность классификатора.
+    topic TEXT NULL,
+    topic_conf NUMERIC(3, 2) NULL,
+    -- Оценка соответствия тону автора.
+    tov_score NUMERIC(3, 2) NULL,
+    -- Тип контента: lesson / video / post / case / faq и т.д.
+    content_type TEXT NULL,
+    -- Ключевые слова (JSON-список).
+    keywords JSONB NOT NULL DEFAULT '[]'::JSONB,
+    -- Флаг успешной очистки/валидации.
+    cleaned BOOLEAN NOT NULL DEFAULT FALSE,
+    -- Дополнительные атрибуты (размер, версия и т.д.).
+    metadata JSONB NOT NULL DEFAULT '{}'::JSONB,
+    -- Таймстемпы и soft delete.
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    is_deleted BOOLEAN NOT NULL DEFAULT FALSE
+);
+
+CREATE INDEX IF NOT EXISTS content_chunks_doc_idx
+    ON content_chunks(doc_id, sequence);
+CREATE INDEX IF NOT EXISTS content_chunks_topic_idx
+    ON content_chunks(topic);
+
+-- Мета-информация об эмбеддингах в Chroma.
+CREATE TABLE IF NOT EXISTS chunk_embeddings_meta (
+    -- PK, совпадает с идентификатором векторов в Chroma.
+    embedding_id UUID PRIMARY KEY,
+    -- FK → content_chunks.chunk_id.
+    chunk_id UUID NOT NULL REFERENCES content_chunks(chunk_id),
+    -- Имя коллекции: content_all / faq_basic / personal_embedding и др.
+    collection_name TEXT NOT NULL,
+    -- Метаданные о модели эмбеддинга.
+    embedding_provider TEXT NOT NULL,
+    embedding_dim INTEGER NOT NULL,
+    -- Время последней индексации.
+    indexed_at TIMESTAMPTZ NOT NULL,
+    -- Флаг, что чанк нужно повторно синхронизировать.
+    needs_sync BOOLEAN NOT NULL DEFAULT FALSE,
+    -- Дополнительные сведения (версии, ошибки).
+    metadata JSONB NOT NULL DEFAULT '{}'::JSONB,
+    -- Soft delete для удаления векторов.
+    is_deleted BOOLEAN NOT NULL DEFAULT FALSE
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS chunk_embeddings_chunk_idx
+    ON chunk_embeddings_meta(chunk_id, collection_name);
+
+-- Каталог материалов психолога (витрина).
+CREATE TABLE IF NOT EXISTS psychologist_content (
+    content_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    source_id UUID NULL REFERENCES sources(source_id),
+    title TEXT NOT NULL,
+    summary TEXT NULL,
+    description TEXT NULL,
+    content_type TEXT NOT NULL,
+    topic TEXT NULL,
+    tags JSONB NOT NULL DEFAULT '[]'::JSONB,
+    price NUMERIC(10, 2) NULL,
+    currency TEXT NULL DEFAULT 'RUB',
+    url TEXT NULL,
+    media_url TEXT NULL,
+    thumbnail_url TEXT NULL,
+    duration_minutes INTEGER NULL,
+    available BOOLEAN NOT NULL DEFAULT TRUE,
+    metadata JSONB NOT NULL DEFAULT '{}'::JSONB,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    is_deleted BOOLEAN NOT NULL DEFAULT FALSE
+);
+
+CREATE INDEX IF NOT EXISTS psychologist_content_topic_idx
+    ON psychologist_content(topic);
+
+-- Эталоны стиля общения (few-shot TOV).
+CREATE TABLE IF NOT EXISTS style_examples (
+    example_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    topic TEXT NOT NULL,
+    question TEXT NOT NULL,
+    answer TEXT NOT NULL,
+    tov_score NUMERIC(3, 2) NOT NULL,
+    flags JSONB NOT NULL DEFAULT '[]'::JSONB,
+    source_ref TEXT NULL,
+    metadata JSONB NOT NULL DEFAULT '{}'::JSONB,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    is_active BOOLEAN NOT NULL DEFAULT TRUE
+);
+
+CREATE INDEX IF NOT EXISTS style_examples_topic_idx
+    ON style_examples(topic);
