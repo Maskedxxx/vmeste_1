@@ -8,6 +8,7 @@ services:
       - "${API_PORT:-8000}:8000"
     depends_on:
       - chroma
+      - postgres
 
   chroma:
     image: ghcr.io/chroma-core/chroma:latest
@@ -18,5 +19,17 @@ services:
     volumes:
       - chroma_data:/chroma/.chroma
 
+  postgres:
+    image: postgres:16-alpine
+    container_name: vmeste-postgres
+    env_file:
+      - .env
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+
 volumes:
   chroma_data:
+  postgres_data:

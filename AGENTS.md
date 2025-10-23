@@ -66,7 +66,6 @@
 # src/services/auth.py
 # --- agent_meta ---
 # role: auth-service
-# owner: @backend
 # contract: предоставляет /login и /refresh
 # last_reviewed: 2025-01-10
 # interfaces:
