@@ -195,22 +195,36 @@ CREATE UNIQUE INDEX IF NOT EXISTS chunk_embeddings_chunk_idx
 
 -- Каталог материалов психолога (витрина).
 CREATE TABLE IF NOT EXISTS psychologist_content (
+    -- PK карточки каталога.
     content_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    -- Опциональная связь с исходным материалом.
     source_id UUID NULL REFERENCES sources(source_id),
+    -- Заголовок карточки.
     title TEXT NOT NULL,
+    -- Краткое описание (используется в превью).
     summary TEXT NULL,
+    -- Полный текст описания для каталога.
     description TEXT NULL,
+    -- Тип контента: lesson / webinar / article / course / consultation.
     content_type TEXT NOT NULL,
+    -- Основная тема (стресс, отношения и т.д.).
     topic TEXT NULL,
+    -- Теги для фильтрации и поиска.
     tags JSONB NOT NULL DEFAULT '[]'::JSONB,
+    -- Стоимость и валюта (NULL, если материал бесплатный).
     price NUMERIC(10, 2) NULL,
     currency TEXT NULL DEFAULT 'RUB',
+    -- Ссылки на лендинг/материал/медиаприложения.
     url TEXT NULL,
     media_url TEXT NULL,
     thumbnail_url TEXT NULL,
+    -- Длительность (для видео/уроков).
     duration_minutes INTEGER NULL,
+    -- Флаг доступности в каталоге.
     available BOOLEAN NOT NULL DEFAULT TRUE,
+    -- Дополнительные бизнес-атрибуты.
     metadata JSONB NOT NULL DEFAULT '{}'::JSONB,
+    -- Таймстемпы и soft delete.
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     is_deleted BOOLEAN NOT NULL DEFAULT FALSE
@@ -221,14 +235,23 @@ CREATE INDEX IF NOT EXISTS psychologist_content_topic_idx
 
 -- Эталоны стиля общения (few-shot TOV).
 CREATE TABLE IF NOT EXISTS style_examples (
+    -- PK эталонного примера.
     example_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    -- Тема, к которой относится пример.
     topic TEXT NOT NULL,
+    -- Пример вопроса пользователя.
     question TEXT NOT NULL,
+    -- Эталонный ответ в нужном тоне.
     answer TEXT NOT NULL,
+    -- Оценка соответствия TOV (0..1).
     tov_score NUMERIC(3, 2) NOT NULL,
+    -- Дополнительные флаги (эмпатия, запреты и т.д.).
     flags JSONB NOT NULL DEFAULT '[]'::JSONB,
+    -- Ссылка на источник (URL, идентификатор документа).
     source_ref TEXT NULL,
+    -- Дополнительные сведения.
     metadata JSONB NOT NULL DEFAULT '{}'::JSONB,
+    -- Таймстемпы и признак активности.
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     is_active BOOLEAN NOT NULL DEFAULT TRUE

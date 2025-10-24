@@ -22,8 +22,11 @@ services:
   postgres:
     image: postgres:16-alpine
     container_name: vmeste-postgres
-    env_file:
-      - .env
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-vmeste}
+      POSTGRES_USER: ${POSTGRES_USER:-vmeste}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-vmeste_password}
+      POSTGRES_HOST_AUTH_METHOD: trust
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:

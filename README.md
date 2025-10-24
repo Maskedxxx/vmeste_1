@@ -36,6 +36,13 @@
 
 Инициализационный SQL находится в `db/init.sql` и выполняется автоматически при первом старте контейнера PostgreSQL.
 
+### Проверка слоя доступа к БД
+- Установите зависимости: `pip install -r requirements.txt`
+- Поднимите PostgreSQL: `docker compose up --build -d`
+- Выполните `python -m app.db.connection` — скрипт выполнит `SELECT 1` и сообщит о готовности пула
+- Создайте пользователя для проверки: `python -m app.db.repositories.users` (использует временный `external_id`)
+- По окончании остановите контейнеры: `docker compose down`
+
 ## Структура репозитория
 - `app/main.py` — приложение FastAPI и эндпоинт `/health`
 - `requirements.txt` — минимальный набор зависимостей

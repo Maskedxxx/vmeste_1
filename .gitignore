@@ -1,6 +1,9 @@
 Legacy/
 .DS_Store
 
+# Personal notes
+docs/
+
 # Python
 __pycache__/
 *.py[cod]
