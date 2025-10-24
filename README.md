@@ -37,14 +37,31 @@
 Инициализационный SQL находится в `db/init.sql` и выполняется автоматически при первом старте контейнера PostgreSQL.
 
 ### Проверка слоя доступа к БД
-- Установите зависимости: `pip install -r requirements.txt`
-- Поднимите PostgreSQL: `docker compose up --build -d`
-- Выполните `python -m app.db.connection` — скрипт выполнит `SELECT 1` и сообщит о готовности пула
-- Создайте пользователя для проверки: `python -m app.db.repositories.users` (использует временный `external_id`)
-- По окончании остановите контейнеры: `docker compose down`
+1. `pip install -r requirements.txt`
+2. `docker compose up --build -d`
+3. `python -m app.db.connection`
+4. `python -m app.db.repositories.users`
+5. `python -m app.db.repositories.sessions`
+6. `python -m app.db.repositories.chat_history`
+7. `python -m app.db.repositories.user_memory`
+8. `docker compose down`
+
+### API (v0)
+- `POST /users` — создать пользователя или вернуть существующего по `external_id`
+- `GET /users/{external_id}` — получить пользователя
+- `PUT /users/{user_id}/profile` — обновить профиль
+- `POST /sessions` — создать сессию
+- `GET /sessions/{user_id}/active` — получить активную сессию
+- `POST /sessions/{session_id}/close` — завершить сессию
+- `PATCH /sessions/{session_id}/state` — обновить state графа
+- `POST /sessions/{session_id}/messages` — записать сообщение
+- `GET /sessions/{session_id}/messages` — история сессии
+- `GET /users/{user_id}/messages` — история по пользователю
+- `GET /users/{user_id}/memory` — получить память
+- `PUT /users/{user_id}/memory` — обновить память
 
 ## Структура репозитория
-- `app/main.py` — приложение FastAPI и эндпоинт `/health`
+- `app/main.py` — приложение FastAPI, `/health` и базовые CRUD эндпоинты
 - `requirements.txt` — минимальный набор зависимостей
 - `docker-compose.yml` — сервисы API, Chroma и PostgreSQL
 - `Dockerfile` — сборка контейнера API
