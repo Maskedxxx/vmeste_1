@@ -29,6 +29,8 @@ CREATE TABLE IF NOT EXISTS users (
     user_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     -- Уникальный внешний идентификатор (например, Telegram ID).
     external_id TEXT NOT NULL UNIQUE,
+    -- Email пользователя, primary login.
+    email TEXT NOT NULL UNIQUE,
     -- Профиль пользователя (интейк, теги, tov и т.д.).
     profile_json JSONB NOT NULL,
     -- Таймстемпы создания/обновления карточки.
@@ -106,6 +108,10 @@ CREATE TABLE IF NOT EXISTS user_memory (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+INSERT INTO users (external_id, email, profile_json)
+VALUES ('test-user', 'test-user@example.com', '{}'::JSONB)
+ON CONFLICT (external_id) DO NOTHING;
 
 -- Документы после транскрибации/нормализации.
 CREATE TABLE IF NOT EXISTS documents (

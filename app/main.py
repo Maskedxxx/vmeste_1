@@ -1,12 +1,12 @@
 """Точка входа FastAPI-приложения для проекта «Вместе» (v0)."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 import logging
 from typing import Literal
 from uuid import UUID
 
 from fastapi import FastAPI, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field
 
 from app.db.models import (
     ChatMessage,
@@ -24,7 +24,7 @@ from app.db.repositories import chat_history, sessions, user_memory, users
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("vmeste.api")
 
-app = FastAPI(title="Vmeste API", version="0.2.0")
+app = FastAPI(title="Vmeste API", version="0.3.0")
 
 
 class HealthResponse(BaseModel):
@@ -51,7 +51,7 @@ class ChatMessageRequest(BaseModel):
 
     user_id: UUID
     sender: Literal["user", "assistant"]
-    message_type: str
+    message_type: str = "text"
     payload: dict[str, object]
     request_timestamp: datetime | None = None
     response_timestamp: datetime | None = None
@@ -81,18 +81,27 @@ def health_check() -> HealthResponse:
 
 @app.post("/users", response_model=User, tags=["users"], status_code=status.HTTP_201_CREATED)
 def create_user(payload: UserCreate) -> User:
-    """Создаёт пользователя или возвращает существующего по external_id."""
-    existing = users.get_by_external_id(payload.external_id)
+    """Создаёт пользователя или возвращает существующего по email."""
+    existing = users.get_by_email(payload.email)
     if existing:
-        logger.info("Пользователь %s уже существует", payload.external_id)
+        logger.info("Пользователь %s уже существует", payload.email)
         return existing
     return users.create_user(payload)
 
 
-@app.get("/users/{external_id}", response_model=User, tags=["users"])
-def get_user(external_id: str) -> User:
-    """Возвращает пользователя по external_id."""
-    user = users.get_by_external_id(external_id)
+@app.get("/users/email/{email}", response_model=User, tags=["users"])
+def get_user_by_email(email: EmailStr) -> User:
+    """Возвращает пользователя по email."""
+    user = users.get_by_email(str(email))
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    return user
+
+
+@app.get("/users/{user_id}", response_model=User, tags=["users"])
+def get_user(user_id: UUID) -> User:
+    """Возвращает пользователя по внутреннему идентификатору."""
+    user = users.get_by_id(user_id)
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     return user
@@ -144,7 +153,7 @@ def update_session_state(session_id: UUID, payload: UpdateStateRequest) -> Sessi
     status_code=status.HTTP_201_CREATED,
 )
 def add_message(session_id: UUID, payload: ChatMessageRequest) -> ChatMessage:
-    """Сохраняет сообщение в истории чата."""
+    """Сохраняет сообщение в истории чата и добавляет его в долговременную память."""
     message = ChatMessageCreate(
         session_id=session_id,
         user_id=payload.user_id,
@@ -157,7 +166,17 @@ def add_message(session_id: UUID, payload: ChatMessageRequest) -> ChatMessage:
         expert_score=payload.expert_score,
         user_score=payload.user_score,
     )
-    return chat_history.add_message(message)
+    stored = chat_history.add_message(message)
+
+    timestamp = stored.response_timestamp or stored.request_timestamp or datetime.now(timezone.utc)
+    history_entry = {
+        "role": stored.sender,
+        "message_type": stored.message_type,
+        "payload": stored.payload,
+        "timestamp": timestamp,
+    }
+    user_memory.append_conversation_entry(stored.user_id, history_entry)
+    return stored
 
 
 @app.get("/sessions/{session_id}/messages", response_model=list[ChatMessage], tags=["chat"])

@@ -22,6 +22,7 @@ logger = logging.getLogger("vmeste.db.repositories.users")
 USER_COLUMNS = (
     "user_id",
     "external_id",
+    "email",
     "profile_json",
     "created_at",
     "updated_at",
@@ -30,14 +31,15 @@ USER_COLUMNS = (
 
 def create_user(payload: UserCreate) -> User:
     """Создаёт пользователя и возвращает полную запись."""
-    logger.info("Создание пользователя с external_id=%s", payload.external_id)
+    logger.info("Создание пользователя email=%s", payload.email)
     query = f"""
-        INSERT INTO users (external_id, profile_json)
-        VALUES (%(external_id)s, %(profile_json)s)
+        INSERT INTO users (external_id, email, profile_json)
+        VALUES (%(external_id)s, %(email)s, %(profile_json)s)
         RETURNING {", ".join(USER_COLUMNS)}
     """
     params = {
         "external_id": payload.external_id,
+        "email": payload.email,
         "profile_json": Json(payload.profile_json),
     }
     row = fetch_one(query, params)
@@ -48,15 +50,27 @@ def create_user(payload: UserCreate) -> User:
     return User.model_validate(row)
 
 
-def get_by_external_id(external_id: str) -> User | None:
-    """Возвращает пользователя по внешнему идентификатору."""
-    logger.debug("Поиск пользователя external_id=%s", external_id)
+def get_by_email(email: str) -> User | None:
+    """Возвращает пользователя по email."""
+    logger.debug("Поиск пользователя email=%s", email)
     query = f"""
         SELECT {", ".join(USER_COLUMNS)}
         FROM users
-        WHERE external_id = %(external_id)s
+        WHERE email = %(email)s
     """
-    row = fetch_one(query, {"external_id": external_id})
+    row = fetch_one(query, {"email": email})
+    return User.model_validate(row) if row else None
+
+
+def get_by_id(user_id: UUID) -> User | None:
+    """Возвращает пользователя по внутреннему идентификатору."""
+    logger.debug("Поиск пользователя user_id=%s", user_id)
+    query = f"""
+        SELECT {", ".join(USER_COLUMNS)}
+        FROM users
+        WHERE user_id = %(user_id)s
+    """
+    row = fetch_one(query, {"user_id": user_id})
     return User.model_validate(row) if row else None
 
 
@@ -86,7 +100,8 @@ def update_profile(user_id: UUID, profile_json: dict[str, Any]) -> User:
 
 __all__ = [
     "create_user",
-    "get_by_external_id",
+    "get_by_email",
+    "get_by_id",
     "update_profile",
 ]
 
@@ -94,6 +109,6 @@ __all__ = [
 if __name__ == "__main__":
     from uuid import uuid4
 
-    demo = UserCreate(external_id=f"demo-{uuid4()}")
+    demo = UserCreate(external_id=f"demo-{uuid4()}", email="demo@example.com")
     created_user = create_user(demo)
-    print("Создан пользователь:", created_user.external_id)
+    print("Создан пользователь:", created_user.email)

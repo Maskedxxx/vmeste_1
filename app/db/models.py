@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field
 
 
 class User(BaseModel):
@@ -19,6 +19,7 @@ class User(BaseModel):
 
     user_id: UUID
     external_id: str
+    email: EmailStr
     profile_json: dict[str, Any]
     created_at: datetime
     updated_at: datetime
@@ -28,6 +29,7 @@ class UserCreate(BaseModel):
     """Модель для создания пользователя."""
 
     external_id: str = Field(..., min_length=1)
+    email: EmailStr
     profile_json: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -109,5 +111,5 @@ class UserMemoryUpsert(BaseModel):
 
 
 if __name__ == "__main__":
-    example = UserCreate(external_id="demo-user")
+    example = UserCreate(external_id="demo-user", email="demo@example.com")
     print("Пример модели UserCreate:", example.model_dump())

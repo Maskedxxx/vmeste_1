@@ -46,9 +46,15 @@
 7. `python -m app.db.repositories.user_memory`
 8. `docker compose down`
 
+### CLI-демо
+- Убедитесь, что API запущен (`uvicorn app.main:app --reload` или `docker compose up`)
+- `python scripts/chat_cli.py` — интерактивный чат с реальной LLM (нужен `OPENAI_API_KEY`, опционально `OPENAI_MODEL`)
+- После скриптов можно посмотреть записи в `chat_history` и `user_memory`
+
 ### API (v0)
-- `POST /users` — создать пользователя или вернуть существующего по `external_id`
-- `GET /users/{external_id}` — получить пользователя
+- `POST /users` — создать пользователя или вернуть существующего по email
+- `GET /users/email/{email}` — получить пользователя по email
+- `GET /users/{user_id}` — получить пользователя по внутреннему идентификатору
 - `PUT /users/{user_id}/profile` — обновить профиль
 - `POST /sessions` — создать сессию
 - `GET /sessions/{user_id}/active` — получить активную сессию

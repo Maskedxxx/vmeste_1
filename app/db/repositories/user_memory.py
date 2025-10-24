@@ -9,7 +9,9 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import logging
+from typing import Any, MutableMapping
 from uuid import UUID
 
 from psycopg.types.json import Json
@@ -70,14 +72,63 @@ def upsert_memory(payload: UserMemoryUpsert) -> UserMemory:
 __all__ = [
     "get_memory",
     "upsert_memory",
+    "append_conversation_entry",
 ]
+
+
+def _ensure_memory_structure(memory_data: MutableMapping[str, Any]) -> MutableMapping[str, Any]:
+    """Гарантирует наличие базовых ключей в памяти."""
+    if "conversation_history" not in memory_data:
+        memory_data["conversation_history"] = []
+    return memory_data
+
+
+def append_conversation_entry(
+    user_id: UUID,
+    entry: dict[str, Any],
+    max_length: int = 2000,
+) -> UserMemory:
+    """Добавляет сообщение в conversation_history с ограничением длины."""
+    logger.debug("Добавление записи в память user_id=%s", user_id)
+    memory = get_memory(user_id)
+    memory_data: MutableMapping[str, Any]
+    if memory:
+        memory_data = dict(memory.memory_data)
+    else:
+        memory_data = {}
+    memory_data = _ensure_memory_structure(memory_data)
+
+    history: list[dict[str, Any]] = list(memory_data["conversation_history"])
+
+    timestamp = entry.get("timestamp")
+    if timestamp is None:
+        timestamp = datetime.now(tz=timezone.utc).isoformat()
+    else:
+        if isinstance(timestamp, datetime):
+            timestamp = timestamp.astimezone(timezone.utc).isoformat()
+        else:
+            timestamp = str(timestamp)
+    entry["timestamp"] = timestamp
+    history.append(entry)
+    if len(history) > max_length:
+        history = history[-max_length:]
+    memory_data["conversation_history"] = history
+
+    return upsert_memory(
+        UserMemoryUpsert(
+            user_id=user_id,
+            memory_data=dict(memory_data),
+        )
+    )
 
 
 if __name__ == "__main__":
     from uuid import uuid4
     from app.db.repositories.users import create_user, UserCreate
 
-    demo_user = create_user(UserCreate(external_id=f"memory-demo-{uuid4()}"))
+    demo_user = create_user(
+        UserCreate(external_id=f"memory-demo-{uuid4()}", email="memory@example.com")
+    )
     memory = upsert_memory(
         UserMemoryUpsert(
             user_id=demo_user.user_id,
