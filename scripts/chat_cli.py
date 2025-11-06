@@ -36,7 +36,7 @@ from openai import OpenAI
 
 BASE_URL = os.getenv("VMESTE_API_URL", "http://localhost:8000")
 REQUEST_TIMEOUT = float(os.getenv("VMESTE_API_TIMEOUT", "150"))
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini-2025-04-14")
 HISTORY_LIMIT = int(os.getenv("VMESTE_HISTORY_LIMIT", "40"))
 SYSTEM_PROMPT = os.getenv(
     "VMESTE_SYSTEM_PROMPT",

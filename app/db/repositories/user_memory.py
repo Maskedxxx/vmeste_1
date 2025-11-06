@@ -17,7 +17,14 @@ from uuid import UUID
 from psycopg.types.json import Json
 
 from app.db.connection import fetch_one
-from app.db.models import UserMemory, UserMemoryUpsert
+from app.db.models import (
+    QuizAnswer,
+    QuizAnswerUpdate,
+    QuizProfile,
+    QuizProfileUpdate,
+    UserMemory,
+    UserMemoryUpsert,
+)
 
 
 logger = logging.getLogger("vmeste.db.repositories.user_memory")
@@ -69,10 +76,15 @@ def upsert_memory(payload: UserMemoryUpsert) -> UserMemory:
     return UserMemory.model_validate(row)
 
 
+QUIZ_PROFILE_KEY = "quiz_profile"
+
+
 __all__ = [
     "get_memory",
     "upsert_memory",
     "append_conversation_entry",
+    "get_quiz_profile",
+    "upsert_quiz_profile",
 ]
 
 
@@ -80,6 +92,8 @@ def _ensure_memory_structure(memory_data: MutableMapping[str, Any]) -> MutableMa
     """Гарантирует наличие базовых ключей в памяти."""
     if "conversation_history" not in memory_data:
         memory_data["conversation_history"] = []
+    if QUIZ_PROFILE_KEY not in memory_data:
+        memory_data[QUIZ_PROFILE_KEY] = QuizProfile().model_dump()
     return memory_data
 
 
@@ -119,6 +133,85 @@ def append_conversation_entry(
             user_id=user_id,
             memory_data=dict(memory_data),
         )
+    )
+
+
+def get_quiz_profile(user_id: UUID) -> QuizProfile | None:
+    """Возвращает квиз-профиль пользователя, если он есть."""
+    memory = get_memory(user_id)
+    if memory is None:
+        return None
+    raw_profile = memory.memory_data.get(QUIZ_PROFILE_KEY)
+    if not isinstance(raw_profile, MutableMapping):
+        return None
+    return QuizProfile.model_validate(raw_profile)
+
+
+def upsert_quiz_profile(user_id: UUID, payload: QuizProfileUpdate) -> QuizProfile:
+    """Обновляет данные квиз-профиля пользователя."""
+    logger.info("Обновление quiz_profile user_id=%s", user_id)
+    memory = get_memory(user_id)
+    memory_data: MutableMapping[str, Any]
+    if memory:
+        memory_data = dict(memory.memory_data)
+    else:
+        memory_data = {}
+    memory_data = _ensure_memory_structure(memory_data)
+
+    current_profile_raw = memory_data.get(QUIZ_PROFILE_KEY)
+    current_profile = QuizProfile.model_validate(current_profile_raw)
+    updated_profile = _merge_quiz_profile(current_profile, payload)
+    memory_data[QUIZ_PROFILE_KEY] = updated_profile.model_dump(mode="json")
+
+    upsert_memory(
+        UserMemoryUpsert(
+            user_id=user_id,
+            memory_data=dict(memory_data),
+        )
+    )
+    return updated_profile
+
+
+def _merge_quiz_profile(existing: QuizProfile, update: QuizProfileUpdate) -> QuizProfile:
+    """Возвращает объединённый квиз-профиль."""
+    version = update.version if update.version is not None else existing.version
+    completed = update.completed if update.completed is not None else existing.completed
+    completed_at = (
+        update.completed_at
+        if update.completed_at is not None
+        else existing.completed_at
+    )
+
+    meta = dict(existing.meta)
+    if update.meta:
+        meta.update(update.meta)
+
+    answers = dict(existing.answers)
+    if update.answers:
+        for question_id, answer_update in update.answers.items():
+            answers[question_id] = _build_quiz_answer(answer_update)
+
+    if isinstance(completed_at, str):
+        completed_dt = datetime.fromisoformat(completed_at)
+    else:
+        completed_dt = completed_at
+
+    return QuizProfile(
+        version=version,
+        completed=completed,
+        completed_at=completed_dt,
+        answers=answers,
+        meta=meta,
+    )
+
+
+def _build_quiz_answer(update: QuizAnswerUpdate) -> QuizAnswer:
+    """Формирует полный ответ квиза."""
+    updated_at = update.updated_at or datetime.now(tz=timezone.utc)
+    return QuizAnswer(
+        value=update.value,
+        confidence=update.confidence,
+        updated_at=updated_at,
     )
 
 

@@ -11,7 +11,7 @@ from functools import lru_cache
 from typing import Literal
 
 from pydantic import Field
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -29,11 +29,12 @@ class Settings(BaseSettings):
     postgres_user: str = Field("vmeste", alias="POSTGRES_USER")
     postgres_password: str = Field("vmeste_password", alias="POSTGRES_PASSWORD")
 
-    model_config = {
-        "env_file": ".env",
-        "env_file_encoding": "utf-8",
-        "frozen": True,
-    }
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        frozen=True,
+        extra="ignore",
+    )
 
     @property
     def postgres_dsn(self) -> str:

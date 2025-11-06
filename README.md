@@ -50,6 +50,7 @@
 - Убедитесь, что API запущен (`uvicorn app.main:app --reload` или `docker compose up`)
 - `python scripts/chat_cli.py` — интерактивный чат с реальной LLM (нужен `OPENAI_API_KEY`, опционально `OPENAI_MODEL`)
 - После скриптов можно посмотреть записи в `chat_history` и `user_memory`
+- `python scripts/quiz_demo.py` — имитация заполнения семейного квиза (через HTTP API создаёт пользователя по email, задаёт 5 вопросов и сохраняет `quiz_profile`)
 
 ### API (v0)
 - `POST /users` — создать пользователя или вернуть существующего по email
@@ -65,6 +66,8 @@
 - `GET /users/{user_id}/messages` — история по пользователю
 - `GET /users/{user_id}/memory` — получить память
 - `PUT /users/{user_id}/memory` — обновить память
+- `GET /users/{user_id}/quiz-profile` — получить ответы квиза
+- `PUT /users/{user_id}/quiz-profile` — записать/обновить ответы квиза
 
 ## Структура репозитория
 - `app/main.py` — приложение FastAPI, `/health` и базовые CRUD эндпоинты

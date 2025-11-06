@@ -93,6 +93,42 @@ class ChatMessageCreate(BaseModel):
     user_score: int | None = None
 
 
+class QuizAnswer(BaseModel):
+    """Ответ на конкретный вопрос квиза."""
+
+    value: Any
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    updated_at: datetime
+
+
+class QuizAnswerUpdate(BaseModel):
+    """Данные для обновления ответа."""
+
+    value: Any
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    updated_at: datetime | None = None
+
+
+class QuizProfile(BaseModel):
+    """Снимок квиз-профиля пользователя."""
+
+    version: str | None = None
+    completed: bool = False
+    completed_at: datetime | None = None
+    answers: dict[str, QuizAnswer] = Field(default_factory=dict)
+    meta: dict[str, Any] = Field(default_factory=dict)
+
+
+class QuizProfileUpdate(BaseModel):
+    """Частичное обновление квиз-профиля."""
+
+    version: str | None = None
+    completed: bool | None = None
+    completed_at: datetime | None = None
+    answers: dict[str, QuizAnswerUpdate] = Field(default_factory=dict)
+    meta: dict[str, Any] | None = None
+
+
 class UserMemory(BaseModel):
     """Структура долговременной памяти пользователя."""
 

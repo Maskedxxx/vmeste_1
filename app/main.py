@@ -11,6 +11,8 @@ from pydantic import BaseModel, EmailStr, Field
 from app.db.models import (
     ChatMessage,
     ChatMessageCreate,
+    QuizProfile,
+    QuizProfileUpdate,
     Session,
     SessionCreate,
     User,
@@ -202,6 +204,26 @@ def upsert_memory(user_id: UUID, payload: MemoryRequest) -> UserMemory:
     """Создаёт или обновляет память пользователя."""
     request = UserMemoryUpsert(user_id=user_id, memory_data=payload.memory_data)
     return user_memory.upsert_memory(request)
+
+
+@app.get(
+    "/users/{user_id}/quiz-profile",
+    response_model=QuizProfile | None,
+    tags=["memory"],
+)
+def get_quiz_profile(user_id: UUID) -> QuizProfile | None:
+    """Возвращает результаты квиза, если они есть."""
+    return user_memory.get_quiz_profile(user_id)
+
+
+@app.put(
+    "/users/{user_id}/quiz-profile",
+    response_model=QuizProfile,
+    tags=["memory"],
+)
+def update_quiz_profile(user_id: UUID, payload: QuizProfileUpdate) -> QuizProfile:
+    """Обновляет квиз-профиль пользователя."""
+    return user_memory.upsert_quiz_profile(user_id, payload)
 
 
 if __name__ == "__main__":
