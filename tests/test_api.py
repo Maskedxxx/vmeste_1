@@ -216,3 +216,277 @@ def test_get_memory(
     assert "memory_data" in memory
     assert memory["memory_data"]["custom_key"] == "custom_value"
     assert isinstance(memory["memory_data"]["conversation_history"], list)
+
+
+# =============================================================================
+# Тесты служебных эндпоинтов
+# =============================================================================
+
+@pytest.mark.api
+def test_health_check(client: TestClient):
+    """
+    Проверяет что GET /health возвращает статус сервиса.
+
+    Этот endpoint используется для health checks в production.
+    """
+    response = client.get("/health")
+    assert response.status_code == 200
+
+    data = response.json()
+    assert data["status"] == "ok"
+
+
+# =============================================================================
+# Тесты эндпоинтов работы с пользователями
+# =============================================================================
+
+@pytest.mark.api
+def test_get_user_by_email(
+    client: TestClient,
+    sample_user: dict[str, Any]
+):
+    """
+    Проверяет что GET /users/email/{email} находит пользователя по email.
+
+    Также проверяет 404 для несуществующего email.
+    """
+    email = sample_user["email"]
+    user_id = sample_user["user_id"]
+
+    # Запрашиваем существующего пользователя
+    response = client.get(f"/users/email/{email}")
+    assert response.status_code == 200
+
+    user = response.json()
+    assert user["user_id"] == user_id
+    assert user["email"] == email
+
+    # Запрашиваем несуществующего пользователя
+    response_404 = client.get("/users/email/nonexistent@example.com")
+    assert response_404.status_code == 404
+
+
+@pytest.mark.api
+def test_get_user_by_id(
+    client: TestClient,
+    sample_user: dict[str, Any]
+):
+    """
+    Проверяет что GET /users/{user_id} находит пользователя по UUID.
+
+    Также проверяет 404 для несуществующего UUID.
+    """
+    user_id = sample_user["user_id"]
+    email = sample_user["email"]
+
+    # Запрашиваем существующего пользователя
+    response = client.get(f"/users/{user_id}")
+    assert response.status_code == 200
+
+    user = response.json()
+    assert user["user_id"] == user_id
+    assert user["email"] == email
+
+    # Запрашиваем несуществующего пользователя
+    fake_uuid = "00000000-0000-0000-0000-000000000000"
+    response_404 = client.get(f"/users/{fake_uuid}")
+    assert response_404.status_code == 404
+
+
+@pytest.mark.api
+def test_update_user_profile(
+    client: TestClient,
+    sample_user: dict[str, Any]
+):
+    """
+    Проверяет что PUT /users/{user_id}/profile обновляет profile_json.
+
+    Также проверяет 404 для несуществующего пользователя.
+    """
+    user_id = sample_user["user_id"]
+
+    # Обновляем профиль
+    new_profile = {"age": 25, "city": "Moscow", "interests": ["psychology"]}
+    response = client.put(
+        f"/users/{user_id}/profile",
+        json={"profile_json": new_profile}
+    )
+    assert response.status_code == 200
+
+    updated_user = response.json()
+    assert updated_user["profile_json"] == new_profile
+
+    # Проверяем что изменения сохранились
+    get_response = client.get(f"/users/{user_id}")
+    user = get_response.json()
+    assert user["profile_json"] == new_profile
+
+    # Проверяем 404 для несуществующего пользователя
+    fake_uuid = "00000000-0000-0000-0000-000000000000"
+    response_404 = client.put(
+        f"/users/{fake_uuid}/profile",
+        json={"profile_json": {"test": True}}
+    )
+    assert response_404.status_code == 404
+
+
+# =============================================================================
+# Тесты эндпоинтов управления сессиями
+# =============================================================================
+
+@pytest.mark.api
+def test_get_active_session(
+    client: TestClient,
+    sample_user: dict[str, Any],
+    sample_session: dict[str, Any]
+):
+    """
+    Проверяет что GET /sessions/{user_id}/active возвращает активную сессию.
+
+    Также проверяет что для пользователя без сессий возвращается null.
+    """
+    user_id = sample_user["user_id"]
+    session_id = sample_session["session_id"]
+
+    # Получаем активную сессию
+    response = client.get(f"/sessions/{user_id}/active")
+    assert response.status_code == 200
+
+    session = response.json()
+    assert session is not None
+    assert session["session_id"] == session_id
+    assert session["status"] == "active"
+
+    # Создаём второго пользователя без сессий
+    from uuid import uuid4
+    user2_response = client.post(
+        "/users",
+        json={
+            "external_id": f"no-sessions-{uuid4()}",
+            "email": f"no-sessions-{uuid4()}@example.com"
+        }
+    )
+    user2_id = user2_response.json()["user_id"]
+
+    # Проверяем что для пользователя без сессий возвращается null
+    response_none = client.get(f"/sessions/{user2_id}/active")
+    assert response_none.status_code == 200
+    assert response_none.json() is None
+
+
+@pytest.mark.api
+def test_close_session(
+    client: TestClient,
+    sample_session: dict[str, Any]
+):
+    """
+    Проверяет что POST /sessions/{session_id}/close завершает сессию.
+
+    Также проверяет 404 для несуществующей сессии.
+    """
+    session_id = sample_session["session_id"]
+
+    # Закрываем сессию
+    response = client.post(
+        f"/sessions/{session_id}/close",
+        json={"status": "completed"}
+    )
+    assert response.status_code == 200
+
+    closed_session = response.json()
+    assert closed_session["status"] == "completed"
+    assert closed_session["ended_at"] is not None
+
+    # Проверяем 404 для несуществующей сессии
+    fake_uuid = "00000000-0000-0000-0000-000000000000"
+    response_404 = client.post(
+        f"/sessions/{fake_uuid}/close",
+        json={"status": "completed"}
+    )
+    assert response_404.status_code == 404
+
+
+@pytest.mark.api
+def test_update_session_state(
+    client: TestClient,
+    sample_session: dict[str, Any]
+):
+    """
+    Проверяет что PATCH /sessions/{session_id}/state обновляет state_json.
+
+    Также проверяет 404 для несуществующей сессии.
+    """
+    session_id = sample_session["session_id"]
+
+    # Обновляем состояние сессии
+    new_state = {"step": "intake_done", "next_action": "consultation"}
+    response = client.patch(
+        f"/sessions/{session_id}/state",
+        json={"state_json": new_state}
+    )
+    assert response.status_code == 200
+
+    updated_session = response.json()
+    assert updated_session["state_json"] == new_state
+
+    # Проверяем 404 для несуществующей сессии
+    fake_uuid = "00000000-0000-0000-0000-000000000000"
+    response_404 = client.patch(
+        f"/sessions/{fake_uuid}/state",
+        json={"state_json": {"test": True}}
+    )
+    assert response_404.status_code == 404
+
+
+# =============================================================================
+# Тесты эндпоинтов истории сообщений
+# =============================================================================
+
+@pytest.mark.api
+def test_get_user_messages(
+    client: TestClient,
+    sample_user: dict[str, Any]
+):
+    """
+    Проверяет что GET /users/{user_id}/messages возвращает все сообщения пользователя.
+
+    Проверяет работу параметра limit.
+    """
+    user_id = sample_user["user_id"]
+
+    # Создаём 2 сессии
+    session1 = client.post(
+        "/sessions",
+        json={"user_id": user_id, "mode": "intake", "status": "active"}
+    ).json()
+    session2 = client.post(
+        "/sessions",
+        json={"user_id": user_id, "mode": "consultation", "status": "active"}
+    ).json()
+
+    # Добавляем по 2 сообщения в каждую сессию (всего 4)
+    for session_id in [session1["session_id"], session2["session_id"]]:
+        for i in range(1, 3):
+            client.post(
+                f"/sessions/{session_id}/messages",
+                json={
+                    "user_id": user_id,
+                    "sender": "user",
+                    "message_type": "text",
+                    "payload": {"text": f"Message {i} in session {session_id}"}
+                }
+            )
+
+    # Получаем все сообщения пользователя
+    response = client.get(f"/users/{user_id}/messages")
+    assert response.status_code == 200
+
+    messages = response.json()
+    assert len(messages) == 4
+
+    # Проверяем лимит
+    response_limited = client.get(f"/users/{user_id}/messages?limit=2")
+    assert response_limited.status_code == 200
+
+    limited_messages = response_limited.json()
+    assert len(limited_messages) == 2
