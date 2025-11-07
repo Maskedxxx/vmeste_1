@@ -19,12 +19,17 @@ venv/
 # Environment files
 .env
 .env.*
+CLAUDE.md
 
 # Tooling
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+
+# Test coverage
 .coverage
+htmlcov/
+.coverage.*
 
 # IDE
 .idea/

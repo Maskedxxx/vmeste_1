@@ -1,0 +1,23 @@
+# Docker Compose для тестового окружения
+# Запуск: docker compose -f docker-compose.test.yml up -d
+# Остановка: docker compose -f docker-compose.test.yml down
+
+services:
+  test-postgres:
+    image: postgres:16-alpine
+    container_name: vmeste-test-postgres
+    environment:
+      POSTGRES_DB: test_vmeste
+      POSTGRES_USER: test_user
+      POSTGRES_PASSWORD: test_password
+      POSTGRES_HOST_AUTH_METHOD: trust
+    ports:
+      - "5433:5432"  # Используем порт 5433 чтобы не конфликтовать с production БД
+    volumes:
+      # Применяем ту же схему что и в production
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U test_user -d test_vmeste"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
