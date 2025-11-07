@@ -89,8 +89,8 @@ class ChatMessageCreate(BaseModel):
     request_timestamp: datetime | None = None
     response_timestamp: datetime | None = None
     conversion_completed: bool = False
-    expert_score: int | None = None
-    user_score: int | None = None
+    expert_score: int | None = Field(default=None, ge=1, le=5)
+    user_score: int | None = Field(default=None, ge=1, le=5)
 
 
 class QuizAnswer(BaseModel):
