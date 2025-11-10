@@ -1,5 +1,8 @@
 Legacy/
 .DS_Store
+tmp_pdf.txt
+data/
+scripts/
 
 # Personal notes
 docs/
