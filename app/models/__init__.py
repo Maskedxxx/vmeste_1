@@ -9,6 +9,7 @@
 
 from app.models.dialog_summary import DialogSummary
 from app.models.recommendation import ContentCandidate, RecommendationOffer, RecommendationReply
+from app.models.therapy import TherapyReply
 from app.models.user_profile import UserProfileModel
 
 __all__ = [
@@ -17,4 +18,5 @@ __all__ = [
     "RecommendationReply",
     "UserProfileModel",
     "DialogSummary",
+    "TherapyReply",
 ]

@@ -75,11 +75,11 @@ def _format_history(records: Iterable[ChatMessage]) -> list[dict[str, str]]:
 
     items: list[dict[str, str]] = []
     for record in records:
-        payload = record.get("payload", {})
+        payload = record.payload or {}
         text = payload.get("text")
         if not text:
             continue
-        items.append({"role": record.get("sender", "user"), "text": text})
+        items.append({"role": record.sender or "user", "text": text})
     return items
 
 
@@ -116,9 +116,9 @@ def summarize_dialog(
 if __name__ == "__main__":
     import os
 
-    demo_user_id = os.getenv("VMESTE_DEMO_USER_ID")
+    demo_user_id = "469a0f1d-01de-4340-8e8d-e5897eb43d52"
     if not demo_user_id:
         print("Укажите VMESTE_DEMO_USER_ID и запустите модуль повторно.")
     else:
         result = summarize_dialog(user_id=UUID(demo_user_id))
-        print(result.model_dump_json(indent=2, ensure_ascii=False))
+        print(result.model_dump_json(indent=2))
