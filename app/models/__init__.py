@@ -8,6 +8,7 @@
 """Пакет доменных моделей (не связан напрямую со схемой БД)."""
 
 from app.models.dialog_summary import DialogSummary
+from app.models.rag_chat import RagReference, RagReply
 from app.models.recommendation import ContentCandidate, RecommendationOffer, RecommendationReply
 from app.models.therapy import TherapyReply
 from app.models.user_profile import UserProfileModel
@@ -16,6 +17,8 @@ __all__ = [
     "ContentCandidate",
     "RecommendationOffer",
     "RecommendationReply",
+    "RagReference",
+    "RagReply",
     "UserProfileModel",
     "DialogSummary",
     "TherapyReply",
