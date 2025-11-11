@@ -1,20 +1,24 @@
-# «Вместе» — backend v0
+# «Вместе» — backend v0.4
 
-Проект создаёт основу LLM-сервиса для персонализированных рекомендаций психологического контента. Текущая цель — поднять минимальный API, контейнеры и базу данных для дальнейшего развития workflow «сбор → понимание → рекомендация».
+LLM-сервис для персонализированной психологической поддержки. Реализовано: REST API, LLM-агенты (профиль, рекомендации, терапия, саммари), долговременная память, векторное хранилище.
 
-## Стек первой итерации
-- FastAPI — входная точка и оркестрация запросов
-- LangChain + LangGraph — реализация многошагового диалога (будет подключено далее)
-- Chroma — локальное векторное хранилище в контейнере
-- PostgreSQL — транзакционная база для пользователей, сессий и истории (развёрнута в docker-compose)
-- Redis — будет добавлен на следующем этапе
-- YandexGPT — облачная LLM, интеграция планируется
-- Langfuse — наблюдаемость и трассировка цепочек
+## Стек
+- **FastAPI** — REST API
+- **PostgreSQL** — транзакционные данные (11 таблиц)
+- **Chroma** — векторное хранилище (в контейнере)
+- **OpenAI** — LLM для тестирования (gpt-4.1-mini)
+- **Pydantic v2** — валидация и structured outputs
+- **Docker Compose** — оркестрация контейнеров
+
+*Планируется:* LangGraph, YandexGPT, Redis, Langfuse
 
 ## Быстрый старт
-1. Установите зависимости: `pip install -r requirements.txt`
-2. Запустите приложение: `uvicorn app.main:app --host 0.0.0.0 --port 8000`
-3. Проверьте статус: `curl http://localhost:8000/health` → ожидается `{"status":"ok"}`
+```bash
+pip install -r requirements.txt
+export OPENAI_API_KEY=sk-...  # для LLM-сервисов
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+curl http://localhost:8000/health  # {"status":"ok"}
+```
 
 ### Запуск в контейнере
 1. Создайте файл окружения: `cp .env.example .env`
@@ -22,37 +26,27 @@
 3. API станет доступным по `http://localhost:8000`, Chroma — на `http://localhost:8001`, PostgreSQL — на `localhost:5432`
 4. Для остановки исполните `docker compose down` (данные БД сохраняются в named-volume `postgres_data`)
 
-### Структура БД (v0)
-- `sources` — реестр исходных материалов (тип, ссылка, метаданные, soft delete)
-- `documents` — тексты после транскрибации, связаны с источниками
-- `content_chunks` — рабочие фрагменты для RAG с темами, TOV и метаданными
-- `chunk_embeddings_meta` — связь чанков с коллекциями Chroma и статус синхронизации
-- `psychologist_content` — каталог платных материалов (описание, цена, теги)
-- `style_examples` — эталонные Q/A для поддержания тона общения
-- `users` — карточка пользователя и профиль intake (JSONB)
-- `sessions` — сессии диалога: режим (`intake`, `consultation`, `support`), статус, состояние LangGraph
-- `chat_history` — все сообщения в рамках сессий, с метками качества (`expert_score`, `user_score`)
-- `user_memory` — агрегированная долговременная память пользователя (ключ-значение в JSONB)
+### БД (11 таблиц)
+**Пользователи:** users, sessions, chat_history, user_memory
+**Контент:** sources, documents, content_chunks, chunk_embeddings_meta, embedding_index_state, psychologist_content, style_examples
 
-Инициализационный SQL находится в `db/init.sql` и выполняется автоматически при первом старте контейнера PostgreSQL.
+Схема: `db/init.sql` (выполняется автоматически в Docker)
 
-### Проверка слоя доступа к БД
-1. `pip install -r requirements.txt`
-2. `docker compose up --build -d`
-3. `python -m app.db.connection`
-4. `python -m app.db.repositories.users`
-5. `python -m app.db.repositories.sessions`
-6. `python -m app.db.repositories.chat_history`
-7. `python -m app.db.repositories.user_memory`
-8. `docker compose down`
+### Демо и проверка
+```bash
+# Репозитории
+docker compose up postgres -d
+python -m app.db.repositories.users
 
-### CLI-демо
-- Убедитесь, что API запущен (`uvicorn app.main:app --reload` или `docker compose up`)
-- `python scripts/chat_cli.py` — интерактивный чат с реальной LLM (нужен `OPENAI_API_KEY`, опционально `OPENAI_MODEL`)
-- После скриптов можно посмотреть записи в `chat_history` и `user_memory`
-- `python scripts/quiz_demo.py` — имитация заполнения семейного квиза (через HTTP API создаёт пользователя по email, задаёт 5 вопросов и сохраняет `quiz_profile`)
+# LLM-сервисы (требуется OPENAI_API_KEY)
+export VMESTE_DEMO_USER_ID=469a0f1d-01de-4340-8e8d-e5897eb43d52
+python -m app.services.profile_enrichment    # профиль из квиза
+python -m app.services.recommendation_agent  # персонализация контента
+python -m app.services.dialog_summary        # саммари диалога
+python -m app.services.therapy_agent         # терапевтический ответ
+```
 
-### API (v0)
+### API (12 эндпоинтов)
 - `POST /users` — создать пользователя или вернуть существующего по email
 - `GET /users/email/{email}` — получить пользователя по email
 - `GET /users/{user_id}` — получить пользователя по внутреннему идентификатору
@@ -69,13 +63,25 @@
 - `GET /users/{user_id}/quiz-profile` — получить ответы квиза
 - `PUT /users/{user_id}/quiz-profile` — записать/обновить ответы квиза
 
-## Структура репозитория
-- `app/main.py` — приложение FastAPI, `/health` и базовые CRUD эндпоинты
-- `requirements.txt` — минимальный набор зависимостей
-- `docker-compose.yml` — сервисы API, Chroma и PostgreSQL
-- `Dockerfile` — сборка контейнера API
-- `.env.example` — шаблон переменных окружения
-- `db/init.sql` — схема таблиц пользователей и контента в PostgreSQL
-- `Legacy/` — исходные материалы проекта (не попадает в репозиторий)
+## Структура
+```
+app/
+├── main.py              # FastAPI эндпоинты
+├── models/              # Pydantic схемы для LLM
+│   ├── user_profile.py
+│   ├── recommendation.py
+│   ├── dialog_summary.py
+│   └── therapy.py
+├── services/            # LLM-сервисы
+│   ├── profile_enrichment.py
+│   ├── recommendation_agent.py
+│   ├── dialog_summary.py
+│   └── therapy_agent.py
+└── db/
+    ├── models.py        # Схема БД
+    ├── connection.py
+    └── repositories/    # CRUD операции
+```
 
-Дальше планируется реализация LangGraph workflow, расширение схемы данными контента и интеграция с YandexGPT.
+**Конфигурация:** config.py, .env, docker-compose.yml
+**БД:** db/init.sql

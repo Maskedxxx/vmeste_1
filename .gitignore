@@ -23,7 +23,6 @@ venv/
 # Environment files
 .env
 .env.*
-CLAUDE.md
 
 # Tooling
 .pytest_cache/
