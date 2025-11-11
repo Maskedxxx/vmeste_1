@@ -28,6 +28,11 @@ class Settings(BaseSettings):
     postgres_db: str = Field("vmeste", alias="POSTGRES_DB")
     postgres_user: str = Field("vmeste", alias="POSTGRES_USER")
     postgres_password: str = Field("vmeste_password", alias="POSTGRES_PASSWORD")
+    openai_model: str = Field(
+        "gpt-4.1-mini",
+        alias="OPENAI_MODEL",
+        description="Модель OpenAI, используемая для генерации профиля.",
+    )
 
     model_config = SettingsConfigDict(
         env_file=".env",

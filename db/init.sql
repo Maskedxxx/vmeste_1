@@ -199,6 +199,20 @@ CREATE TABLE IF NOT EXISTS chunk_embeddings_meta (
 CREATE UNIQUE INDEX IF NOT EXISTS chunk_embeddings_chunk_idx
     ON chunk_embeddings_meta(chunk_id, collection_name);
 
+CREATE TABLE IF NOT EXISTS embedding_index_state (
+    embedding_id UUID PRIMARY KEY,
+    record_type TEXT NOT NULL,
+    record_id TEXT NOT NULL,
+    collection_name TEXT NOT NULL,
+    embedding_provider TEXT NOT NULL,
+    embedding_dim INTEGER NOT NULL,
+    indexed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    needs_sync BOOLEAN NOT NULL DEFAULT FALSE,
+    metadata JSONB NOT NULL DEFAULT '{}'::JSONB,
+    is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+    UNIQUE (record_type, record_id, collection_name)
+);
+
 -- Каталог материалов психолога (витрина).
 CREATE TABLE IF NOT EXISTS psychologist_content (
     -- PK карточки каталога.

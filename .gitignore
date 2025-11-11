@@ -3,6 +3,7 @@ Legacy/
 tmp_pdf.txt
 data/
 scripts/
+!scripts/conversation_runner.py
 
 # Personal notes
 docs/
