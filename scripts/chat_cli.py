@@ -146,7 +146,9 @@ def build_messages(history: list[dict[str, Any]]) -> list[dict[str, str]]:
 
 def run_cli() -> None:
     """Основной цикл общения."""
-    api_key = "OPENAI_API_KEY_REDACTED"
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        fatal("OPENAI_API_KEY не задан. Укажите его в .env или переменных окружения.")
 
     client = OpenAI(api_key=api_key)
 
