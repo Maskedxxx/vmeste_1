@@ -247,4 +247,4 @@ if __name__ == "__main__":
     if not args.user_id:
         raise SystemExit("Нужно передать --user-id или установить VMESTE_DEMO_USER_ID")
     reply = run_rag_chat(user_id=UUID(args.user_id), user_message=args.question, history_limit=args.history)
-    print(reply.model_dump_json(indent=2, ensure_ascii=False))
+    print(reply.model_dump_json(indent=2))
