@@ -44,9 +44,14 @@ python -m app.services.profile_enrichment    # профиль из квиза
 python -m app.services.recommendation_agent  # персонализация контента
 python -m app.services.dialog_summary        # саммари диалога
 python -m app.services.therapy_agent         # терапевтический ответ
+
+# Пайплайн входа/квиза (CLI)
+python -m app.cli.pipeline_cli --email demo@vmeste.io
+python -m app.cli.pipeline_cli --email demo@vmeste.io --quiz  # пройти квиз и сохранить
 ```
 
 ### API (12 эндпоинтов)
+- `POST /entry` — проверяет пользователя по email, создаёт нового при отсутствии (отдаёт `is_new` и `quiz_completed`)
 - `POST /users` — создать пользователя или вернуть существующего по email
 - `GET /users/email/{email}` — получить пользователя по email
 - `GET /users/{user_id}` — получить пользователя по внутреннему идентификатору
@@ -67,6 +72,8 @@ python -m app.services.therapy_agent         # терапевтический о
 ```
 app/
 ├── main.py              # FastAPI эндпоинты
+├── cli/                 # CLI-инструменты пайплайна
+│   └── pipeline_cli.py
 ├── models/              # Pydantic схемы для LLM
 │   ├── user_profile.py
 │   ├── recommendation.py
@@ -76,7 +83,8 @@ app/
 │   ├── profile_enrichment.py
 │   ├── recommendation_agent.py
 │   ├── dialog_summary.py
-│   └── therapy_agent.py
+│   ├── therapy_agent.py
+│   └── quiz_service.py
 └── db/
     ├── models.py        # Схема БД
     ├── connection.py

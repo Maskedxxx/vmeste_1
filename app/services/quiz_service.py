@@ -9,16 +9,12 @@
 #   - validate_answers(raw_answers: dict[str, str]) -> QuizResult
 # --- /agent_meta ---
 
-"""Сервис квиза: выдаёт вопросы и приводится ответы к единому формату."""
+"""Сервис квиза: задаёт вопросы, валидирует и сохраняет ответы."""
 
-"""
-TODO:
-- Добавить слой API (например, FastAPI-эндпоинты) или фонового сервиса, который принимает
-  ответы от клиента и сохраняет их в user_memory.memory_data (ключ quiz_profile.answers).
-- После сохранения автоматически проверять, обогащён ли профиль пользователя
-  (`users.profile_json`). Если поле пустое или устарело, запускать агент
-  `app/services/profile_enrichment.py` для генерации обновлённого профиля на основе квиза.
-"""
+# TODO:
+# - Добавить HTTP/API-обёртку, чтобы фронтенд мог принимать ответы без CLI.
+# - После сохранения квиза автоматически запускать обогащение профиля пользователя
+#   (`app/services/profile_enrichment.py`), если профиль пустой или устарел.
 
 from __future__ import annotations
 
@@ -26,14 +22,23 @@ import argparse
 import json
 import logging
 import re
+from datetime import datetime, timezone
 from typing import Iterable
+from uuid import UUID
 
+from app.db.models import QuizAnswerUpdate, QuizProfile, QuizProfileUpdate
+from app.db.repositories import user_memory
 from app.models import ChoiceOption, QuestionType, QuizAnswer, QuizQuestion, QuizResult
 
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s :: %(message)s",
+)
 logger = logging.getLogger("vmeste.services.quiz_service")
 
 AGE_PATTERN = re.compile(r"(\d{1,3})")
+DEFAULT_QUIZ_VERSION = "sex_health_v1"
 
 
 def get_quiz_questions() -> list[QuizQuestion]:
@@ -160,12 +165,50 @@ def _normalize_gender(value: str) -> str:
     raise ValueError("Пол нужно выбрать из списка (мужчина/женщина)")
 
 
-def _cli() -> None:
-    parser = argparse.ArgumentParser(description="Проверка сервиса квиза.")
-    parser.add_argument("--as-json", action="store_true", help="Вывести ответы в JSON.")
-    args = parser.parse_args()
+def run_quiz_for_user(
+    user_id: UUID,
+    *,
+    answers: list[QuizAnswer] | None = None,
+    version: str = DEFAULT_QUIZ_VERSION,
+    interactive: bool = True,
+) -> QuizProfile:
+    """Запускает квиз для пользователя, сохраняет ответы в user_memory."""
+    logger.info("Старт квиза user_id=%s", user_id)
+    collected = answers
+    if collected is None:
+        if not interactive:
+            msg = "Для неинтерактивного режима нужно передать answers"
+            logger.error(msg)
+            raise ValueError(msg)
+        collected = _collect_answers_cli(get_quiz_questions())
 
-    questions = get_quiz_questions()
+    validated = validate_answers(collected)
+    update = _build_quiz_payload(validated, version)
+    profile = user_memory.upsert_quiz_profile(user_id, update)
+    logger.info("Квиз сохранён user_id=%s, version=%s", user_id, version)
+    return profile
+
+
+def _build_quiz_payload(result: QuizResult, version: str) -> QuizProfileUpdate:
+    """Готовит структуру для upsert_quiz_profile."""
+    timestamp = datetime.now(timezone.utc)
+    answers = {
+        answer.question_id: QuizAnswerUpdate(
+            value=answer.value,
+            updated_at=timestamp,
+        )
+        for answer in result.answers
+    }
+    return QuizProfileUpdate(
+        version=version,
+        completed=True,
+        completed_at=timestamp,
+        answers=answers,
+    )
+
+
+def _collect_answers_cli(questions: list[QuizQuestion]) -> list[QuizAnswer]:
+    """Интерактивно собирает ответы через CLI."""
     collected: list[QuizAnswer] = []
     print("=== Квиз демо ===")
     for question in questions:
@@ -178,7 +221,15 @@ def _cli() -> None:
                 print(f"  {idx}. {option.label}")
         value = _ask_with_validation(question)
         collected.append(QuizAnswer(question_id=question.question_id, value=value))
+    return collected
 
+
+def _cli() -> None:
+    parser = argparse.ArgumentParser(description="Проверка сервиса квиза.")
+    parser.add_argument("--as-json", action="store_true", help="Вывести ответы в JSON.")
+    args = parser.parse_args()
+
+    collected = _collect_answers_cli(get_quiz_questions())
     result = QuizResult(answers=collected)
     if args.as_json:
         print(json.dumps(result.model_dump(), ensure_ascii=False, indent=2))

@@ -138,6 +138,7 @@ LLM-сервис для персонализированной психолог�
 
 **Базовые:**
 - `GET /health` → HealthResponse — проверка работоспособности
+- `POST /entry` → EntryResponse — проверить пользователя по email, создать при отсутствии и вернуть `is_new`, `quiz_completed`
 
 **Пользователи (users):**
 - `POST /users` → User — создать или вернуть существующего по email
@@ -165,7 +166,7 @@ LLM-сервис для персонализированной психолог�
 - `PUT /users/{user_id}/quiz-profile` → QuizProfile — обновить ответы
 
 **Request/Response модели:**
-- `HealthResponse`, `CloseSessionRequest`, `UpdateStateRequest`
+- `HealthResponse`, `CloseSessionRequest`, `UpdateStateRequest`, `EntryRequest`, `EntryResponse`
 - `ChatMessageRequest`, `MemoryRequest`, `ProfileRequest`
 
 ---
@@ -239,7 +240,13 @@ LLM-сервис для персонализированной психолог�
 **Управление квизом:**
 - Формирование вопросов
 - Валидация ответов
-- Обработка результатов
+- Сохранение результатов в user_memory через `run_quiz_for_user`
+
+### app/cli/pipeline_cli.py
+**CLI пайплайн:**
+- Проверка шага входа (создание/поиск пользователя, статус квиза)
+- Запуск интерактивного квиза и запись ответов
+- Вывод сводки в текстовом или JSON-формате
 
 ### dialog_summary.py
 **Саммаризация диалогов:**

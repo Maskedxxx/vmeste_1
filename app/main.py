@@ -23,7 +23,10 @@ from app.db.models import (
 from app.db.repositories import chat_history, sessions, user_memory, users
 
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s :: %(message)s",
+)
 logger = logging.getLogger("vmeste.api")
 
 app = FastAPI(title="Vmeste API", version="0.3.0")
@@ -74,11 +77,43 @@ class ProfileRequest(BaseModel):
     profile_json: dict[str, object]
 
 
+class EntryRequest(BaseModel):
+    """Данные для входа пользователя в систему."""
+
+    email: EmailStr
+
+
+class EntryResponse(BaseModel):
+    """Результат проверки пользователя по email."""
+
+    user: User
+    is_new: bool
+    quiz_completed: bool = False
+
+
 @app.get("/health", response_model=HealthResponse, tags=["service"])
 def health_check() -> HealthResponse:
     """Возвращает статус сервиса."""
     logger.debug("Получен запрос /health")
     return HealthResponse(status="ok")
+
+
+@app.post("/entry", response_model=EntryResponse, tags=["entry"])
+def entrypoint(payload: EntryRequest) -> EntryResponse:
+    """Проверяет наличие пользователя по email и создаёт его при необходимости."""
+    normalized_email = str(payload.email).strip().lower()
+    logger.info("Запрос входа для %s", normalized_email)
+
+    existing = users.get_by_email(normalized_email)
+    if existing:
+        logger.info("Пользователь %s найден, возвращаем существующего", normalized_email)
+        quiz = user_memory.get_quiz_profile(existing.user_id)
+        quiz_completed = bool(quiz and quiz.completed)
+        return EntryResponse(user=existing, is_new=False, quiz_completed=quiz_completed)
+
+    logger.info("Пользователь %s не найден, создаём запись", normalized_email)
+    created = users.create_user(UserCreate(external_id=normalized_email, email=normalized_email))
+    return EntryResponse(user=created, is_new=True, quiz_completed=False)
 
 
 @app.post("/users", response_model=User, tags=["users"], status_code=status.HTTP_201_CREATED)
