@@ -49,16 +49,20 @@ python -m app.services.therapy_agent         # терапевтический о
 python -m app.cli.pipeline_cli --email demo@vmeste.io
 python -m app.cli.pipeline_cli --email demo@vmeste.io --quiz  # пройти квиз и сохранить
 python -m app.cli.pipeline_cli --email demo@vmeste.io --profile  # проверить профиль
-python -m app.cli.pipeline_cli --email demo@vmeste.io --quiz --profile --force-profile
+python -m app.cli.pipeline_cli --email demo@vmeste.io --diagnostic  # запустить диагностику
+python -m app.cli.pipeline_cli --email demo@vmeste.io --quiz --profile --diagnostic --force-profile
 ```
 
-### API (12 эндпоинтов)
+### API (14 эндпоинтов)
 - `POST /entry` — проверяет пользователя по email, создаёт нового при отсутствии (отдаёт `is_new` и `quiz_completed`)
 - `POST /users` — создать пользователя или вернуть существующего по email
 - `GET /users/email/{email}` — получить пользователя по email
 - `GET /users/{user_id}` — получить пользователя по внутреннему идентификатору
 - `PUT /users/{user_id}/profile` — обновить профиль
 - `POST /users/{user_id}/profile/enrich` — запустить LLM-обогащение profile_json (force-перезапись опциональна)
+- `POST /users/{user_id}/diagnostic/run` — получить/обновить диагностический пакет (тело/психика/сексология)
+- `GET /quiz/questions` — список вопросов квиза (текст, тип, варианты)
+- `POST /quiz/submit` — сохранить ответы квиза, валидируя их через сервис
 - `POST /sessions` — создать сессию
 - `GET /sessions/{user_id}/active` — получить активную сессию
 - `POST /sessions/{session_id}/close` — завершить сессию

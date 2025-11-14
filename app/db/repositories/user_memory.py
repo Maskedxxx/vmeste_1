@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import logging
-from typing import Any, MutableMapping
+from typing import Any, Mapping, MutableMapping
 from uuid import UUID
 
 from psycopg.types.json import Json
@@ -77,6 +77,7 @@ def upsert_memory(payload: UserMemoryUpsert) -> UserMemory:
 
 
 QUIZ_PROFILE_KEY = "quiz_profile"
+DIAGNOSTIC_BUNDLE_KEY = "diagnostic_bundle"
 
 
 __all__ = [
@@ -85,6 +86,8 @@ __all__ = [
     "append_conversation_entry",
     "get_quiz_profile",
     "upsert_quiz_profile",
+    "get_diagnostic_bundle",
+    "upsert_diagnostic_bundle",
 ]
 
 
@@ -213,6 +216,35 @@ def _build_quiz_answer(update: QuizAnswerUpdate) -> QuizAnswer:
         confidence=update.confidence,
         updated_at=updated_at,
     )
+
+
+def get_diagnostic_bundle(user_id: UUID) -> dict[str, Any] | None:
+    """Возвращает сохранённый диагностический пакет, если он есть."""
+    memory = get_memory(user_id)
+    if memory is None:
+        return None
+    bundle = memory.memory_data.get(DIAGNOSTIC_BUNDLE_KEY)
+    if isinstance(bundle, MutableMapping):
+        return dict(bundle)
+    return None
+
+
+def upsert_diagnostic_bundle(user_id: UUID, bundle: Mapping[str, Any]) -> dict[str, Any]:
+    """Сохраняет диагностический пакет в user_memory."""
+    memory = get_memory(user_id)
+    if memory:
+        memory_data = dict(memory.memory_data)
+    else:
+        memory_data = {}
+    memory_data = _ensure_memory_structure(memory_data)
+    memory_data[DIAGNOSTIC_BUNDLE_KEY] = dict(bundle)
+    upsert_memory(
+        UserMemoryUpsert(
+            user_id=user_id,
+            memory_data=memory_data,
+        )
+    )
+    return memory_data[DIAGNOSTIC_BUNDLE_KEY]
 
 
 if __name__ == "__main__":

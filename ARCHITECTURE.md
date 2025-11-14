@@ -165,10 +165,17 @@ LLM-сервис для персонализированной психолог�
 **Квиз:**
 - `GET /users/{user_id}/quiz-profile` → QuizProfile | None — получить ответы квиза
 - `PUT /users/{user_id}/quiz-profile` → QuizProfile — обновить ответы
+- `GET /quiz/questions` → list[QuizQuestion] — получить текст и типы вопросов
+- `POST /quiz/submit` → QuizSubmitResponse — сохранить ответы пользователя (force опционален)
+
+**Диагностика:**
+- `POST /users/{user_id}/diagnostic/run` → DiagnosticResponse — запустить или вернуть кэш диагностики
 
 **Request/Response модели:**
 - `HealthResponse`, `CloseSessionRequest`, `UpdateStateRequest`, `EntryRequest`, `EntryResponse`
 - `ProfileEnrichmentRequest`, `ProfileEnrichmentResponse`
+- `QuizAnswerRequest`, `QuizSubmitRequest`, `QuizSubmitResponse`
+- `DiagnosticRequest`, `DiagnosticResponse`
 - `ChatMessageRequest`, `MemoryRequest`, `ProfileRequest`
 
 ---
@@ -238,6 +245,12 @@ LLM-сервис для персонализированной психолог�
 - Генерация ответа с учетом контекста
 - Возврат ссылок на источники
 
+### diagnostic_agent.py
+**Диагностика состояния:**
+- Анализ по трем направлениям (body, mind, sex)
+- Формирование инсайтов и тегов
+- Сохранение результатов в user_memory (`diagnostic_bundle`) с поддержкой force-режима
+
 ### quiz_service.py
 **Управление квизом:**
 - Формирование вопросов
@@ -249,6 +262,7 @@ LLM-сервис для персонализированной психолог�
 - Проверка шага входа (создание/поиск пользователя, статус квиза)
 - Запуск интерактивного квиза и запись ответов
 - Вызов обогащения profile_json (force-режим опционален)
+- Запуск диагностического агента с кэшированием результатов
 - Вывод сводки в текстовом или JSON-формате
 
 ### dialog_summary.py

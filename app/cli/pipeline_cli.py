@@ -22,6 +22,7 @@ from pydantic import EmailStr, TypeAdapter
 
 from app.db.models import QuizProfile, User, UserCreate
 from app.db.repositories import user_memory, users
+from app.services.diagnostic_agent import run_diagnostic_with_cache
 from app.services.profile_enrichment import ensure_profile_for_user
 from app.services.quiz_service import run_quiz_for_user
 
@@ -72,6 +73,8 @@ def _print_summary(summary: dict[str, Any], as_json: bool) -> None:
         print(f"Профиль обновлён сейчас: {'да' if summary['profile_enriched'] else 'нет'}")
     if "profile_error" in summary:
         print(f"Ошибка профиля: {summary['profile_error']}")
+    if "diagnostic_from_cache" in summary:
+        print(f"Диагностика из кэша: {'да' if summary['diagnostic_from_cache'] else 'нет'}")
 
 
 def main() -> None:
@@ -97,6 +100,16 @@ def main() -> None:
         "--force-profile",
         action="store_true",
         help="Перегенерировать profile_json даже если он есть.",
+    )
+    parser.add_argument(
+        "--diagnostic",
+        action="store_true",
+        help="Запустить диагностический агент и сохранить результат.",
+    )
+    parser.add_argument(
+        "--force-diagnostic",
+        action="store_true",
+        help="Перегенерировать диагностику даже если кэш есть.",
     )
     parser.add_argument("--as-json", action="store_true", help="Выводить JSON.")
     args = parser.parse_args()
@@ -139,6 +152,18 @@ def main() -> None:
         except LookupError as err:
             summary["profile_error"] = str(err)
             logger.error("Ошибка поиска пользователя: %s", err)
+
+    if args.diagnostic:
+        try:
+            bundle, from_cache = run_diagnostic_with_cache(
+                user_id=user.user_id,
+                force=args.force_diagnostic,
+            )
+            summary["diagnostic_from_cache"] = from_cache
+            summary["diagnostic_bundle"] = bundle.model_dump(mode="json")
+        except Exception as err:
+            summary["diagnostic_error"] = str(err)
+            logger.error("Диагностический агент сообщил ошибку: %s", err)
 
     _print_summary(summary, args.as_json)
 

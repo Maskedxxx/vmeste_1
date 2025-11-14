@@ -21,7 +21,11 @@ from app.db.models import (
     UserMemoryUpsert,
 )
 from app.db.repositories import chat_history, sessions, user_memory, users
+from app.models.diagnostic import DiagnosticBundle
+from app.models.quiz import QuizAnswer as QuizAnswerModel, QuizQuestion
+from app.services.diagnostic_agent import run_diagnostic_with_cache
 from app.services.profile_enrichment import EnsureProfileResult, ensure_profile_for_user
+from app.services.quiz_service import DEFAULT_QUIZ_VERSION, get_quiz_questions, run_quiz_for_user, validate_answers
 
 
 logging.basicConfig(
@@ -92,6 +96,45 @@ class ProfileEnrichmentResponse(BaseModel):
     profile: dict[str, object]
 
 
+class QuizAnswerRequest(BaseModel):
+    """Ответ пользователя на вопрос квиза."""
+
+    question_id: str = Field(..., min_length=1)
+    value: str = Field(..., min_length=1)
+
+
+class QuizSubmitRequest(BaseModel):
+    """Пакет ответов квиза для сохранения через API."""
+
+    user_id: UUID
+    answers: list[QuizAnswerRequest]
+    force: bool = False
+    version: str | None = None
+
+
+class QuizSubmitResponse(BaseModel):
+    """Результат сохранения квиза."""
+
+    was_updated: bool
+    completed: bool
+    version: str | None
+    completed_at: datetime | None
+    answers: dict[str, str]
+
+
+class DiagnosticRequest(BaseModel):
+    """Параметры запуска диагностического агента."""
+
+    force: bool = False
+
+
+class DiagnosticResponse(BaseModel):
+    """Структурированный ответ диагностического агента."""
+
+    bundle: DiagnosticBundle
+    from_cache: bool
+
+
 class EntryRequest(BaseModel):
     """Данные для входа пользователя в систему."""
 
@@ -129,6 +172,67 @@ def entrypoint(payload: EntryRequest) -> EntryResponse:
     logger.info("Пользователь %s не найден, создаём запись", normalized_email)
     created = users.create_user(UserCreate(external_id=normalized_email, email=normalized_email))
     return EntryResponse(user=created, is_new=True, quiz_completed=False)
+
+
+@app.get("/quiz/questions", response_model=list[QuizQuestion], tags=["quiz"])
+def list_quiz_questions() -> list[QuizQuestion]:
+    """Возвращает полный список вопросов квиза."""
+    logger.info("Получен запрос на список вопросов квиза")
+    return get_quiz_questions()
+
+
+@app.post("/quiz/submit", response_model=QuizSubmitResponse, tags=["quiz"])
+def submit_quiz(payload: QuizSubmitRequest) -> QuizSubmitResponse:
+    """
+    Принимает ответы квиза, валидирует их и сохраняет в user_memory.
+
+    Args:
+        payload: пользователь, ответы, флаг перезаписи и версия.
+    Returns:
+        Статус завершения квиза и набор ответов.
+    """
+
+    user = users.get_by_id(payload.user_id)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    existing = user_memory.get_quiz_profile(payload.user_id)
+    if existing and existing.completed and not payload.force:
+        logger.info("Квиз уже завершён user_id=%s, возврат кэша", payload.user_id)
+        return QuizSubmitResponse(
+            was_updated=False,
+            completed=existing.completed,
+            version=existing.version,
+            completed_at=existing.completed_at,
+            answers={key: answer.value for key, answer in existing.answers.items()},
+        )
+
+    if not payload.answers:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Answers list is empty")
+
+    raw_answers = [
+        QuizAnswerModel(question_id=answer.question_id, value=answer.value)
+        for answer in payload.answers
+    ]
+    try:
+        validated = validate_answers(raw_answers)
+    except ValueError as error:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
+
+    profile = run_quiz_for_user(
+        user_id=payload.user_id,
+        answers=validated.answers,
+        version=payload.version or DEFAULT_QUIZ_VERSION,
+        interactive=False,
+    )
+    logger.info("Квиз сохранён через API user_id=%s", payload.user_id)
+    return QuizSubmitResponse(
+        was_updated=True,
+        completed=profile.completed,
+        version=profile.version,
+        completed_at=profile.completed_at,
+        answers={key: answer.value for key, answer in profile.answers.items()},
+    )
 
 
 @app.post("/users", response_model=User, tags=["users"], status_code=status.HTTP_201_CREATED)
@@ -199,6 +303,25 @@ def enrich_profile(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
 
     return ProfileEnrichmentResponse(enriched=result.enriched, profile=result.profile)
+
+
+@app.post(
+    "/users/{user_id}/diagnostic/run",
+    response_model=DiagnosticResponse,
+    tags=["diagnostic"],
+)
+def run_diagnostic_endpoint(user_id: UUID, payload: DiagnosticRequest) -> DiagnosticResponse:
+    """Запускает диагностический агент и сохраняет результат в память."""
+    user = users.get_by_id(user_id)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    if not user.profile_json:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Profile is empty. Run enrichment first.",
+        )
+    bundle, from_cache = run_diagnostic_with_cache(user_id=user_id, force=payload.force)
+    return DiagnosticResponse(bundle=bundle, from_cache=from_cache)
 
 
 @app.post("/sessions", response_model=Session, tags=["sessions"], status_code=status.HTTP_201_CREATED)

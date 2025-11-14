@@ -13,23 +13,16 @@
 
 from __future__ import annotations
 
-"""
-TODO:
-- После генерации DiagnosticBundle сохранять результаты в user_memory.memory_data,
-  чтобы другие сервисы (например, подбор тегов или планов) могли использовать готовый контекст.
-  Предлагаемый ключ: memory_data["diagnostic_bundle"] = bundle.model_dump().
-"""
-
 import argparse
 import json
 import logging
-from typing import Any
+from typing import Any, Tuple
 from uuid import UUID
 
 from openai import OpenAI
 
 from app.models import BodyInsight, DiagnosticBundle, MindInsight, SexInsight, UserProfileModel
-from app.db.repositories import users
+from app.db.repositories import user_memory, users
 from config import get_settings
 
 
@@ -132,6 +125,25 @@ def run_diagnostic_agent(user_id: UUID) -> DiagnosticBundle:
     agent = DiagnosticAgent()
     logger.info("Запуск диагностического агента для user_id=%s", user_id)
     return agent.generate_bundle(profile)
+
+
+def run_diagnostic_with_cache(user_id: UUID, *, force: bool = False) -> Tuple[DiagnosticBundle, bool]:
+    """
+    Возвращает диагностический пакет, при необходимости вызывая LLM.
+
+    Returns:
+        bundle, from_cache
+    """
+
+    cached = user_memory.get_diagnostic_bundle(user_id)
+    if cached and not force:
+        logger.info("Используем сохранённый диагностический пакет user_id=%s", user_id)
+        return DiagnosticBundle.model_validate(cached), True
+
+    bundle = run_diagnostic_agent(user_id)
+    user_memory.upsert_diagnostic_bundle(user_id, bundle.model_dump(mode="json"))
+    logger.info("Сохранён новый диагностический пакет user_id=%s", user_id)
+    return bundle, False
 
 
 def _parse_args() -> argparse.Namespace:
