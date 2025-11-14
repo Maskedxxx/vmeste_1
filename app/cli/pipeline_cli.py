@@ -22,6 +22,7 @@ from pydantic import EmailStr, TypeAdapter
 
 from app.db.models import QuizProfile, User, UserCreate
 from app.db.repositories import user_memory, users
+from app.services.profile_enrichment import ensure_profile_for_user
 from app.services.quiz_service import run_quiz_for_user
 
 
@@ -67,6 +68,10 @@ def _print_summary(summary: dict[str, Any], as_json: bool) -> None:
     if "quiz_version" in summary:
         print(f"Версия квиза: {summary['quiz_version']}")
         print("Ответов сохранено:", len(summary.get("quiz_answers", {})))
+    if "profile_enriched" in summary:
+        print(f"Профиль обновлён сейчас: {'да' if summary['profile_enriched'] else 'нет'}")
+    if "profile_error" in summary:
+        print(f"Ошибка профиля: {summary['profile_error']}")
 
 
 def main() -> None:
@@ -82,6 +87,16 @@ def main() -> None:
         "--force-quiz",
         action="store_true",
         help="Переписать ответы, даже если квиз уже завершён.",
+    )
+    parser.add_argument(
+        "--profile",
+        action="store_true",
+        help="Проверить и при необходимости обогатить profile_json.",
+    )
+    parser.add_argument(
+        "--force-profile",
+        action="store_true",
+        help="Перегенерировать profile_json даже если он есть.",
     )
     parser.add_argument("--as-json", action="store_true", help="Выводить JSON.")
     args = parser.parse_args()
@@ -109,6 +124,21 @@ def main() -> None:
                 key: value.model_dump(mode="json") for key, value in quiz.answers.items()
             }
             summary["quiz_completed"] = quiz_completed
+
+    if args.profile:
+        try:
+            profile_result = ensure_profile_for_user(
+                user_id=user.user_id,
+                force=args.force_profile,
+            )
+            summary["profile_enriched"] = profile_result.enriched
+            summary["profile"] = profile_result.profile
+        except ValueError as err:
+            summary["profile_error"] = str(err)
+            logger.warning("Профиль не обновлён: %s", err)
+        except LookupError as err:
+            summary["profile_error"] = str(err)
+            logger.error("Ошибка поиска пользователя: %s", err)
 
     _print_summary(summary, args.as_json)
 

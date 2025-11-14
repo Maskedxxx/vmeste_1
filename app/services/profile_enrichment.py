@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import dataclass
 from typing import Any, Mapping
 from uuid import UUID
 
@@ -127,6 +128,60 @@ def enrich_user_profile(
     users.update_profile(user_id, profile.model_dump())
     logger.info("profile_json обновлён для user_id=%s", user_id)
     return profile
+
+
+@dataclass
+class EnsureProfileResult:
+    """Результат проверки профиля пользователя."""
+
+    enriched: bool
+    profile: dict[str, Any]
+
+
+def ensure_profile_for_user(
+    *,
+    user_id: UUID,
+    force: bool = False,
+    extra_context: str | None = None,
+) -> EnsureProfileResult:
+    """
+    Проверяет, заполнен ли профиль пользователя, и при необходимости запускает обогащение.
+
+    Returns:
+        EnsureProfileResult: enriched=True, если профиль был обновлён; profile — итоговый JSON.
+    Raises:
+        LookupError: если пользователь не найден.
+        ValueError: если нет завершённого квиза для генерации профиля.
+    """
+
+    user = users.get_by_id(user_id)
+    if user is None:
+        msg = f"Пользователь {user_id} не найден"
+        logger.error(msg)
+        raise LookupError(msg)
+
+    has_profile = bool(user.profile_json)
+    if has_profile and not force:
+        logger.info("profile_json уже заполнен user_id=%s, обновление не требуется", user_id)
+        return EnsureProfileResult(enriched=False, profile=user.profile_json)
+
+    quiz = user_memory.get_quiz_profile(user_id)
+    if quiz is None or not quiz.completed or not quiz.answers:
+        msg = "Quiz profile is missing or incomplete"
+        logger.error(msg)
+        raise ValueError(msg)
+
+    quiz_answers = {
+        question_id: answer.model_dump(mode="json")
+        for question_id, answer in quiz.answers.items()
+    }
+    context = extra_context or f"Quiz version: {quiz.version}, completed_at: {quiz.completed_at}"
+    profile = enrich_user_profile(
+        user_id=user_id,
+        quiz_answers=quiz_answers,
+        extra_context=context,
+    )
+    return EnsureProfileResult(enriched=True, profile=profile.model_dump())
 
 
 if __name__ == "__main__":

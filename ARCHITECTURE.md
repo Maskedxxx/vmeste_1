@@ -145,6 +145,7 @@ LLM-сервис для персонализированной психолог�
 - `GET /users/email/{email}` → User — получить по email
 - `GET /users/{user_id}` → User — получить по UUID
 - `PUT /users/{user_id}/profile` → User — обновить profile_json
+- `POST /users/{user_id}/profile/enrich` → ProfileEnrichmentResponse — запустить LLM-обогащение profile_json
 
 **Сессии (sessions):**
 - `POST /sessions` → Session — создать сессию
@@ -167,6 +168,7 @@ LLM-сервис для персонализированной психолог�
 
 **Request/Response модели:**
 - `HealthResponse`, `CloseSessionRequest`, `UpdateStateRequest`, `EntryRequest`, `EntryResponse`
+- `ProfileEnrichmentRequest`, `ProfileEnrichmentResponse`
 - `ChatMessageRequest`, `MemoryRequest`, `ProfileRequest`
 
 ---
@@ -246,6 +248,7 @@ LLM-сервис для персонализированной психолог�
 **CLI пайплайн:**
 - Проверка шага входа (создание/поиск пользователя, статус квиза)
 - Запуск интерактивного квиза и запись ответов
+- Вызов обогащения profile_json (force-режим опционален)
 - Вывод сводки в текстовом или JSON-формате
 
 ### dialog_summary.py

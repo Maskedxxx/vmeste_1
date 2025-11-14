@@ -48,6 +48,8 @@ python -m app.services.therapy_agent         # терапевтический о
 # Пайплайн входа/квиза (CLI)
 python -m app.cli.pipeline_cli --email demo@vmeste.io
 python -m app.cli.pipeline_cli --email demo@vmeste.io --quiz  # пройти квиз и сохранить
+python -m app.cli.pipeline_cli --email demo@vmeste.io --profile  # проверить профиль
+python -m app.cli.pipeline_cli --email demo@vmeste.io --quiz --profile --force-profile
 ```
 
 ### API (12 эндпоинтов)
@@ -56,6 +58,7 @@ python -m app.cli.pipeline_cli --email demo@vmeste.io --quiz  # пройти к�
 - `GET /users/email/{email}` — получить пользователя по email
 - `GET /users/{user_id}` — получить пользователя по внутреннему идентификатору
 - `PUT /users/{user_id}/profile` — обновить профиль
+- `POST /users/{user_id}/profile/enrich` — запустить LLM-обогащение profile_json (force-перезапись опциональна)
 - `POST /sessions` — создать сессию
 - `GET /sessions/{user_id}/active` — получить активную сессию
 - `POST /sessions/{session_id}/close` — завершить сессию

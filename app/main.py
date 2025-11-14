@@ -21,6 +21,7 @@ from app.db.models import (
     UserMemoryUpsert,
 )
 from app.db.repositories import chat_history, sessions, user_memory, users
+from app.services.profile_enrichment import EnsureProfileResult, ensure_profile_for_user
 
 
 logging.basicConfig(
@@ -75,6 +76,20 @@ class ProfileRequest(BaseModel):
     """Запрос на обновление профиля пользователя."""
 
     profile_json: dict[str, object]
+
+
+class ProfileEnrichmentRequest(BaseModel):
+    """Параметры запуска обогащения профиля."""
+
+    force: bool = False
+    extra_context: str | None = None
+
+
+class ProfileEnrichmentResponse(BaseModel):
+    """Результат запуска обогащения профиля."""
+
+    enriched: bool
+    profile: dict[str, object]
 
 
 class EntryRequest(BaseModel):
@@ -151,6 +166,39 @@ def update_profile(user_id: UUID, payload: ProfileRequest) -> User:
         return users.update_profile(user_id, payload.profile_json)
     except LookupError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+
+
+@app.post(
+    "/users/{user_id}/profile/enrich",
+    response_model=ProfileEnrichmentResponse,
+    tags=["users"],
+)
+def enrich_profile(
+    user_id: UUID,
+    payload: ProfileEnrichmentRequest,
+) -> ProfileEnrichmentResponse:
+    """
+    Запускает LLM-обогащение profile_json пользователя.
+
+    Args:
+        user_id: Идентификатор пользователя.
+        payload: Параметры запуска (force и доп. контекст).
+    Returns:
+        ProfileEnrichmentResponse: Итоговый профиль и признак, обновляли ли его.
+    """
+
+    try:
+        result: EnsureProfileResult = ensure_profile_for_user(
+            user_id=user_id,
+            force=payload.force,
+            extra_context=payload.extra_context,
+        )
+    except LookupError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
+
+    return ProfileEnrichmentResponse(enriched=result.enriched, profile=result.profile)
 
 
 @app.post("/sessions", response_model=Session, tags=["sessions"], status_code=status.HTTP_201_CREATED)
