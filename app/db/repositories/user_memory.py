@@ -78,6 +78,7 @@ def upsert_memory(payload: UserMemoryUpsert) -> UserMemory:
 
 QUIZ_PROFILE_KEY = "quiz_profile"
 DIAGNOSTIC_BUNDLE_KEY = "diagnostic_bundle"
+WEEK_PLAN_KEY = "week_plan"
 
 
 __all__ = [
@@ -88,6 +89,8 @@ __all__ = [
     "upsert_quiz_profile",
     "get_diagnostic_bundle",
     "upsert_diagnostic_bundle",
+    "get_week_plan",
+    "upsert_week_plan",
 ]
 
 
@@ -245,6 +248,35 @@ def upsert_diagnostic_bundle(user_id: UUID, bundle: Mapping[str, Any]) -> dict[s
         )
     )
     return memory_data[DIAGNOSTIC_BUNDLE_KEY]
+
+
+def get_week_plan(user_id: UUID) -> dict[str, Any] | None:
+    """Возвращает сохранённый недельный план, если он есть."""
+    memory = get_memory(user_id)
+    if memory is None:
+        return None
+    plan = memory.memory_data.get(WEEK_PLAN_KEY)
+    if isinstance(plan, MutableMapping):
+        return dict(plan)
+    return None
+
+
+def upsert_week_plan(user_id: UUID, plan_payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Сохраняет недельный план в user_memory."""
+    memory = get_memory(user_id)
+    if memory:
+        memory_data = dict(memory.memory_data)
+    else:
+        memory_data = {}
+    memory_data = _ensure_memory_structure(memory_data)
+    memory_data[WEEK_PLAN_KEY] = dict(plan_payload)
+    upsert_memory(
+        UserMemoryUpsert(
+            user_id=user_id,
+            memory_data=memory_data,
+        )
+    )
+    return memory_data[WEEK_PLAN_KEY]
 
 
 if __name__ == "__main__":

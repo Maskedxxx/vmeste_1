@@ -25,6 +25,7 @@ from app.db.repositories import user_memory, users
 from app.services.diagnostic_agent import run_diagnostic_with_cache
 from app.services.profile_enrichment import ensure_profile_for_user
 from app.services.quiz_service import run_quiz_for_user
+from app.services.week_plan_agent import run_week_plan_with_cache
 
 
 logging.basicConfig(
@@ -75,6 +76,10 @@ def _print_summary(summary: dict[str, Any], as_json: bool) -> None:
         print(f"Ошибка профиля: {summary['profile_error']}")
     if "diagnostic_from_cache" in summary:
         print(f"Диагностика из кэша: {'да' if summary['diagnostic_from_cache'] else 'нет'}")
+    if "week_plan_from_cache" in summary:
+        print(f"План из кэша: {'да' if summary['week_plan_from_cache'] else 'нет'}")
+    if "week_plan_error" in summary:
+        print(f"Ошибка плана: {summary['week_plan_error']}")
 
 
 def main() -> None:
@@ -111,6 +116,22 @@ def main() -> None:
         action="store_true",
         help="Перегенерировать диагностику даже если кэш есть.",
     )
+    parser.add_argument(
+        "--week-plan",
+        action="store_true",
+        help="Сгенерировать план на неделю.",
+    )
+    parser.add_argument(
+        "--force-week-plan",
+        action="store_true",
+        help="Пересоздать план, даже если он есть.",
+    )
+    parser.add_argument(
+        "--plan-tags",
+        type=str,
+        default="",
+        help="Список тегов через запятую для подбора плана.",
+    )
     parser.add_argument("--as-json", action="store_true", help="Выводить JSON.")
     args = parser.parse_args()
 
@@ -123,6 +144,9 @@ def main() -> None:
         "is_new": is_new,
         "quiz_completed": quiz_completed,
     }
+    plan_tags = [tag.strip() for tag in args.plan_tags.split(",") if tag.strip()]
+    if plan_tags:
+        summary["plan_tags"] = plan_tags
 
     if args.quiz:
         if quiz_completed and not args.force_quiz:
@@ -164,6 +188,21 @@ def main() -> None:
         except Exception as err:
             summary["diagnostic_error"] = str(err)
             logger.error("Диагностический агент сообщил ошибку: %s", err)
+
+    if args.week_plan:
+        try:
+            if not plan_tags:
+                raise ValueError("Нужно указать --plan-tags для генерации плана")
+            plan, from_cache = run_week_plan_with_cache(
+                user_id=user.user_id,
+                tags=plan_tags,
+                force=args.force_week_plan,
+            )
+            summary["week_plan_from_cache"] = from_cache
+            summary["week_plan"] = plan.model_dump(mode="json")
+        except Exception as err:
+            summary["week_plan_error"] = str(err)
+            logger.error("План не создан: %s", err)
 
     _print_summary(summary, args.as_json)
 

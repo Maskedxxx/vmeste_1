@@ -12,23 +12,18 @@
 
 from __future__ import annotations
 
-"""
-TODO:
-- После генерации WeekPlan сохранять результат в user_memory.memory_data["week_plan"]
-  для дальнейшего использования в интерфейсе и агентами.
-"""
-
 import argparse
 import json
 import logging
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Iterable, Sequence
 from uuid import UUID
 
 from openai import OpenAI
 
 from app.db.connection import fetch_all
-from app.db.repositories import users
+from app.db.repositories import user_memory, users
 from app.models import PlanItem, WeekPlan, UserProfileModel
 from config import get_settings
 
@@ -144,6 +139,10 @@ def select_content_by_tags(tags: Sequence[str], limit: int = 12) -> list[Content
     return selected
 
 
+def _normalized_eq(a: Sequence[str], b: Sequence[str]) -> bool:
+    return _normalize_tags(a) == _normalize_tags(b)
+
+
 class WeekPlanAgent:
     """Инкапсулирует вызов OpenAI для построения плана."""
 
@@ -188,6 +187,40 @@ def generate_week_plan(user_id: UUID, tags: Sequence[str]) -> WeekPlan:
     logger.info("Запуск week plan agent для user_id=%s (материалов=%s)", user_id, len(materials))
     plan = agent.generate_plan(profile, materials)
     return plan
+
+
+def run_week_plan_with_cache(
+    user_id: UUID,
+    tags: Sequence[str],
+    *,
+    force: bool = False,
+) -> tuple[WeekPlan, bool]:
+    """Возвращает недельный план, используя кэш при наличии."""
+
+    normalized_tags = _normalize_tags(tags)
+    if not normalized_tags:
+        raise ValueError("Нужно указать хотя бы один тег для подбора контента")
+
+    cached = user_memory.get_week_plan(user_id)
+    if cached and not force:
+        cached_tags = _normalize_tags(cached.get("tags"))
+        if _normalized_eq(cached_tags, normalized_tags):
+            logger.info("Используем сохранённый план user_id=%s", user_id)
+            plan_payload = cached.get("plan")
+            if not isinstance(plan_payload, dict):
+                logger.warning("Сохранённый план повреждён, пересоздаём user_id=%s", user_id)
+            else:
+                return WeekPlan.model_validate(plan_payload), True
+
+    plan = generate_week_plan(user_id, normalized_tags)
+    payload = {
+        "tags": normalized_tags,
+        "plan": plan.model_dump(mode="json"),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    user_memory.upsert_week_plan(user_id, payload)
+    logger.info("Сохранён новый недельный план user_id=%s", user_id)
+    return plan, False
 
 
 def _parse_args() -> argparse.Namespace:

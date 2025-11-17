@@ -23,9 +23,11 @@ from app.db.models import (
 from app.db.repositories import chat_history, sessions, user_memory, users
 from app.models.diagnostic import DiagnosticBundle
 from app.models.quiz import QuizAnswer as QuizAnswerModel, QuizQuestion
+from app.models.week_plan import WeekPlan
 from app.services.diagnostic_agent import run_diagnostic_with_cache
 from app.services.profile_enrichment import EnsureProfileResult, ensure_profile_for_user
 from app.services.quiz_service import DEFAULT_QUIZ_VERSION, get_quiz_questions, run_quiz_for_user, validate_answers
+from app.services.week_plan_agent import run_week_plan_with_cache
 
 
 logging.basicConfig(
@@ -133,6 +135,21 @@ class DiagnosticResponse(BaseModel):
 
     bundle: DiagnosticBundle
     from_cache: bool
+
+
+class WeekPlanRequest(BaseModel):
+    """Параметры запуска генерации недельного плана."""
+
+    selected_tags: list[str] = Field(..., min_length=1)
+    force: bool = False
+
+
+class WeekPlanResponse(BaseModel):
+    """Ответ сервиса недельного плана."""
+
+    plan: WeekPlan
+    from_cache: bool
+    tags: list[str]
 
 
 class EntryRequest(BaseModel):
@@ -322,6 +339,34 @@ def run_diagnostic_endpoint(user_id: UUID, payload: DiagnosticRequest) -> Diagno
         )
     bundle, from_cache = run_diagnostic_with_cache(user_id=user_id, force=payload.force)
     return DiagnosticResponse(bundle=bundle, from_cache=from_cache)
+
+
+@app.post(
+    "/users/{user_id}/week-plan/run",
+    response_model=WeekPlanResponse,
+    tags=["planning"],
+)
+def run_week_plan_endpoint(user_id: UUID, payload: WeekPlanRequest) -> WeekPlanResponse:
+    """Генерирует и сохраняет недельный план для пользователя."""
+    user = users.get_by_id(user_id)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    if not user.profile_json:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Profile is empty. Run enrichment first.",
+        )
+
+    try:
+        plan, from_cache = run_week_plan_with_cache(
+            user_id=user_id,
+            tags=payload.selected_tags,
+            force=payload.force,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
+
+    return WeekPlanResponse(plan=plan, from_cache=from_cache, tags=payload.selected_tags)
 
 
 @app.post("/sessions", response_model=Session, tags=["sessions"], status_code=status.HTTP_201_CREATED)
