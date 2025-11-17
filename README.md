@@ -26,71 +26,99 @@ curl http://localhost:8000/health  # {"status":"ok"}
 3. API станет доступным по `http://localhost:8000`, Chroma — на `http://localhost:8001`, PostgreSQL — на `localhost:5432`
 4. Для остановки исполните `docker compose down` (данные БД сохраняются в named-volume `postgres_data`)
 
+### Подготовка окружения
+```bash
+docker compose up postgres chroma -d    # инфраструктура
+export OPENAI_API_KEY=sk-...            # ключ OpenAI
+export VMESTE_DEMO_USER_ID=<uuid>       # пользователь для демо-команд
+```
+Далее пройдите CLI-пайплайн (квиз → профиль → диагностика → план), чтобы у пользователя появились все данные.
+
 ### БД (11 таблиц)
 **Пользователи:** users, sessions, chat_history, user_memory
 **Контент:** sources, documents, content_chunks, chunk_embeddings_meta, embedding_index_state, psychologist_content, style_examples
 
 Схема: `db/init.sql` (выполняется автоматически в Docker)
 
-### Демо и проверка
+### Пайплайн (CLI)
 ```bash
-# Репозитории
-docker compose up postgres -d
-python -m app.db.repositories.users
-
-# LLM-сервисы (требуется OPENAI_API_KEY)
-export VMESTE_DEMO_USER_ID=469a0f1d-01de-4340-8e8d-e5897eb43d52
-python -m app.services.profile_enrichment    # профиль из квиза
-python -m app.services.recommendation_agent  # персонализация контента
-python -m app.services.dialog_summary        # саммари диалога
-python -m app.services.therapy_agent         # терапевтический ответ
-
-# Пайплайн входа/квиза (CLI)
-python -m app.cli.pipeline_cli --email demo@vmeste.io
-python -m app.cli.pipeline_cli --email demo@vmeste.io --quiz  # пройти квиз и сохранить
-python -m app.cli.pipeline_cli --email demo@vmeste.io --profile  # проверить профиль
-python -m app.cli.pipeline_cli --email demo@vmeste.io --diagnostic  # запустить диагностику
-python -m app.cli.pipeline_cli --email demo@vmeste.io --quiz --profile --diagnostic --force-profile
+python -m app.cli.pipeline_cli --email demo@vmeste.io --quiz
+python -m app.cli.pipeline_cli --email demo@vmeste.io --profile
+python -m app.cli.pipeline_cli --email demo@vmeste.io --diagnostic
+python -m app.cli.pipeline_cli --email demo@vmeste.io --week-plan --plan-tags "стресс, тревога"
+# Повторно с форсом:
+python -m app.cli.pipeline_cli --email demo@vmeste.io \
+  --quiz --force-quiz \
+  --profile --force-profile \
+  --diagnostic --force-diagnostic \
+  --week-plan --plan-tags "стресс, тревога" --force-week-plan
 ```
 
-### API (14 эндпоинтов)
-- `POST /entry` — проверяет пользователя по email, создаёт нового при отсутствии (отдаёт `is_new` и `quiz_completed`)
-- `POST /users` — создать пользователя или вернуть существующего по email
-- `GET /users/email/{email}` — получить пользователя по email
-- `GET /users/{user_id}` — получить пользователя по внутреннему идентификатору
-- `PUT /users/{user_id}/profile` — обновить профиль
-- `POST /users/{user_id}/profile/enrich` — запустить LLM-обогащение profile_json (force-перезапись опциональна)
-- `POST /users/{user_id}/diagnostic/run` — получить/обновить диагностический пакет (тело/психика/сексология)
-- `GET /quiz/questions` — список вопросов квиза (текст, тип, варианты)
-- `POST /quiz/submit` — сохранить ответы квиза, валидируя их через сервис
-- `POST /sessions` — создать сессию
-- `GET /sessions/{user_id}/active` — получить активную сессию
-- `POST /sessions/{session_id}/close` — завершить сессию
-- `PATCH /sessions/{session_id}/state` — обновить state графа
-- `POST /sessions/{session_id}/messages` — записать сообщение
-- `GET /sessions/{session_id}/messages` — история сессии
-- `GET /users/{user_id}/messages` — история по пользователю
-- `GET /users/{user_id}/memory` — получить память
-- `PUT /users/{user_id}/memory` — обновить память
-- `GET /users/{user_id}/quiz-profile` — получить ответы квиза
-- `PUT /users/{user_id}/quiz-profile` — записать/обновить ответы квиза
+### Демо LLM-сервисов
+```bash
+export VMESTE_DEMO_USER_ID=469a0f1d-01de-4340-8e8d-e5897eb43d52
+python -m app.services.profile_enrichment
+python -m app.services.recommendation_agent
+python -m app.services.dialog_summary
+python -m app.services.therapy_agent
+python -m app.services.diagnostic_agent
+python -m app.services.week_plan_agent
+```
+
+### Минимальный сценарий через API
+```bash
+curl -X POST http://localhost:8000/entry -H "Content-Type: application/json" -d '{"email":"demo@vmeste.io"}'
+curl http://localhost:8000/quiz/questions
+curl -X POST http://localhost:8000/quiz/submit -H "Content-Type: application/json" -d '{"user_id":"<uuid>", "answers":[{"question_id":"age","value":"30"}, ...]}'
+curl -X POST http://localhost:8000/users/<uuid>/profile/enrich -H "Content-Type: application/json" -d '{}'
+curl -X POST http://localhost:8000/users/<uuid>/diagnostic/run -H "Content-Type: application/json" -d '{}'
+curl -X POST http://localhost:8000/users/<uuid>/week-plan/run -H "Content-Type: application/json" -d '{"selected_tags":["стресс","усталость"]}'
+```
+
+### API (21 эндпоинт)
+**Entry / Users**
+- `POST /entry`
+- `POST /users`, `GET /users/email/{email}`, `GET /users/{user_id}`
+- `PUT /users/{user_id}/profile`, `POST /users/{user_id}/profile/enrich`
+
+**Quiz**
+- `GET /quiz/questions`, `POST /quiz/submit`
+- `GET /users/{user_id}/quiz-profile`, `PUT /users/{user_id}/quiz-profile`
+
+**Diagnostic & Planning**
+- `POST /users/{user_id}/diagnostic/run`
+- `POST /users/{user_id}/week-plan/run`
+
+**Sessions / Chat**
+- `POST /sessions`, `GET /sessions/{user_id}/active`
+- `POST /sessions/{session_id}/close`, `PATCH /sessions/{session_id}/state`
+- `POST /sessions/{session_id}/messages`, `GET /sessions/{session_id}/messages`
+- `GET /users/{user_id}/messages`
+
+**Memory**
+- `GET /users/{user_id}/memory`, `PUT /users/{user_id}/memory`
 
 ## Структура
 ```
 app/
-├── main.py              # FastAPI эндпоинты
-├── cli/                 # CLI-инструменты пайплайна
-│   └── pipeline_cli.py
-├── models/              # Pydantic схемы для LLM
+├── main.py               # FastAPI эндпоинты
+├── cli/
+│   └── pipeline_cli.py   # entry → quiz → profile → diagnostic → plan
+├── models/
 │   ├── user_profile.py
+│   ├── diagnostic.py
+│   ├── week_plan.py
 │   ├── recommendation.py
 │   ├── dialog_summary.py
-│   └── therapy.py
-├── services/            # LLM-сервисы
+│   ├── therapy.py
+│   └── quiz.py
+├── services/
 │   ├── profile_enrichment.py
+│   ├── diagnostic_agent.py
+│   ├── week_plan_agent.py
 │   ├── recommendation_agent.py
-│   ├── dialog_summary.py
 │   ├── therapy_agent.py
+│   ├── rag_chat_agent.py
 │   └── quiz_service.py
 └── db/
     ├── models.py        # Схема БД

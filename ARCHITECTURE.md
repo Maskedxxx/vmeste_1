@@ -171,11 +171,15 @@ LLM-сервис для персонализированной психолог�
 **Диагностика:**
 - `POST /users/{user_id}/diagnostic/run` → DiagnosticResponse — запустить или вернуть кэш диагностики
 
+**Планирование:**
+- `POST /users/{user_id}/week-plan/run` → WeekPlanResponse — построить план на неделю по тегам
+
 **Request/Response модели:**
 - `HealthResponse`, `CloseSessionRequest`, `UpdateStateRequest`, `EntryRequest`, `EntryResponse`
 - `ProfileEnrichmentRequest`, `ProfileEnrichmentResponse`
 - `QuizAnswerRequest`, `QuizSubmitRequest`, `QuizSubmitResponse`
 - `DiagnosticRequest`, `DiagnosticResponse`
+- `WeekPlanRequest`, `WeekPlanResponse`
 - `ChatMessageRequest`, `MemoryRequest`, `ProfileRequest`
 
 ---
@@ -263,6 +267,7 @@ LLM-сервис для персонализированной психолог�
 - Запуск интерактивного квиза и запись ответов
 - Вызов обогащения profile_json (force-режим опционален)
 - Запуск диагностического агента с кэшированием результатов
+- Генерация недельного плана по тегам (--plan-tags) с возможностью force
 - Вывод сводки в текстовом или JSON-формате
 
 ### dialog_summary.py
@@ -284,6 +289,7 @@ LLM-сервис для персонализированной психолог�
 **Планирование недели:**
 - Генерация персонализированных активностей
 - Учет приоритетов и возможностей
+- Сохранение результата в user_memory (`week_plan`) с поддержкой кэша/force-режима
 
 ---
 
@@ -303,18 +309,6 @@ LLM-сервис для персонализированной психолог�
 - Создает пользователя
 - Задает 5 вопросов (family_structure, children_ages, primary_concern, support_preferred, previous_experience)
 - Сохраняет через PUT /users/{user_id}/quiz-profile
-
-### chroma_bootstrap.py
-**Инициализация векторного хранилища:**
-- Настройка Chroma коллекций
-- Загрузка начальных данных
-
-### wipe_database.py / wipe_chroma.py
-**Утилиты для очистки данных:**
-- Полная очистка PostgreSQL
-- Очистка Chroma векторов
-
----
 
 ## Тесты (tests/)
 

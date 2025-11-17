@@ -207,7 +207,7 @@ style_examples (независимая таблица)
       "timestamp": "ISO8601"
     }
   ],
-  "quiz_profile": {
+"quiz_profile": {
     "version": "1.0",
     "completed": false,
     "completed_at": null,
@@ -219,6 +219,17 @@ style_examples (независимая таблица)
       }
     },
     "meta": {}
+  },
+  "diagnostic_bundle": {
+    "body": { "analysis": "...", "recommended_doctors": [], "recommended_tests": [], "possible_physiology": [], "tags": [] },
+    "mind": { "analysis": "...", "tags": [] },
+    "sex": { "analysis": "...", "tags": [] },
+    "generated_at": "ISO8601"
+  },
+  "week_plan": {
+    "tags": ["стресс", "усталость"],
+    "plan": { "days": [ { "day": 1, "content_id": "...", "title": "...", "goal": "...", "instructions": "...", "tags": [] }, ... ] },
+    "generated_at": "ISO8601"
   }
 }
 ```
@@ -334,10 +345,6 @@ ON CONFLICT (external_id) DO NOTHING;
 ## Миграции и обслуживание
 
 **Схема применяется:** автоматически при старте контейнера postgres через docker-compose.
-
-**Очистка данных:**
-- `scripts/wipe_database.py` — полная очистка PostgreSQL
-- `scripts/wipe_chroma.py` — очистка векторов
 
 **Проверка подключения:**
 ```sql
