@@ -27,6 +27,7 @@ def list_available(limit: int = 5) -> list[dict[str, Any]]:
             content_id,
             title,
             summary,
+            url,
             topic,
             content_type,
             tags,

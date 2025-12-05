@@ -191,14 +191,13 @@ def main() -> None:
 
     if args.week_plan:
         try:
-            if not plan_tags:
-                raise ValueError("Нужно указать --plan-tags для генерации плана")
-            plan, from_cache = run_week_plan_with_cache(
+            plan, from_cache, used_tags = run_week_plan_with_cache(
                 user_id=user.user_id,
-                tags=plan_tags,
+                tags=plan_tags or None,
                 force=args.force_week_plan,
             )
             summary["week_plan_from_cache"] = from_cache
+            summary["week_plan_tags"] = used_tags
             summary["week_plan"] = plan.model_dump(mode="json")
         except Exception as err:
             summary["week_plan_error"] = str(err)
