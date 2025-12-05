@@ -33,6 +33,16 @@ class Settings(BaseSettings):
         alias="OPENAI_MODEL",
         description="Модель OpenAI, используемая для генерации профиля.",
     )
+    telegram_bot_token: str = Field(
+        "",
+        alias="TELEGRAM_BOT_TOKEN",
+        description="Токен Telegram-бота для тестирования пайплайна.",
+    )
+    api_base_url: str = Field(
+        "http://localhost:8000",
+        alias="VMESTE_API_BASE",
+        description="Базовый URL REST API, который используют внешние клиенты (бот).",
+    )
 
     model_config = SettingsConfigDict(
         env_file=".env",
