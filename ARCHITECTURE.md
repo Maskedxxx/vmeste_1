@@ -21,11 +21,14 @@ LLM-сервис для персонализированной психолог�
 │   │   └── repositories/        # Repository pattern
 │   ├── models/                  # Доменные модели (не БД)
 │   └── services/                # Бизнес-логика и LLM агенты
+├── bot/                         # Внешние клиенты (Telegram и т.д.)
+│   └── telegram_bot.py          # Aiogram-бот для теста входа
 ├── config.py                    # Настройки через Pydantic Settings
+├── API_REFERENCE.md             # Документ с описанием REST API
 ├── db/init.sql                  # Схема БД
 ├── scripts/                     # CLI утилиты и демо
 ├── tests/                       # Тесты (pytest + coverage)
-└── docker-compose.yml           # Оркестрация (api, postgres, chroma)
+└── docker-compose.yml           # Оркестрация (api, postgres, chroma, bot)
 ```
 
 ---
@@ -42,6 +45,8 @@ LLM-сервис для персонализированной психолог�
 - `APP_ENV` — development | production | test
 - `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`
 - `OPENAI_MODEL` — модель для LLM (по умолчанию gpt-4.1-mini)
+- `TELEGRAM_BOT_TOKEN` — токен бота для Aiogram
+- `VMESTE_API_BASE` — базовый URL REST API для внешних клиентов (бот)
 
 **Методы:**
 - `postgres_dsn` — формирует строку подключения к PostgreSQL
@@ -122,6 +127,8 @@ LLM-сервис для персонализированной психолог�
 - `get_quiz_profile(user_id)` → QuizProfile | None
 - `upsert_quiz_profile(user_id, QuizProfileUpdate)` → QuizProfile
   - Умное слияние с существующими данными
+- `get_diagnostic_recommendations(user_id)` → list[dict] | None — получить кэшированные рекомендации
+- `upsert_diagnostic_recommendations(user_id, recommendations)` → list[dict] — сохранить рекомендации диагностики
 
 **Вспомогательные функции:**
 - `_ensure_memory_structure()` — гарантирует базовую структуру memory_data
@@ -130,7 +137,7 @@ LLM-сервис для персонализированной психолог�
 
 #### psychologist_content.py
 **Каталог материалов:**
-- `list_available(limit)` → list[dict] — выборка активных материалов психолога
+- `list_available(limit)` → list[dict] — выборка активных материалов психолога (включая url)
 
 ---
 
@@ -169,7 +176,7 @@ LLM-сервис для персонализированной психолог�
 - `POST /quiz/submit` → QuizSubmitResponse — сохранить ответы пользователя (force опционален)
 
 **Диагностика:**
-- `POST /users/{user_id}/diagnostic/run` → DiagnosticResponse — запустить или вернуть кэш диагностики
+- `POST /users/{user_id}/diagnostic/run` → DiagnosticResponse — диагностика + персонализированные рекомендации контента (с кэшированием)
 
 **Планирование:**
 - `POST /users/{user_id}/week-plan/run` → WeekPlanResponse — построить план на неделю по тегам
@@ -200,9 +207,10 @@ LLM-сервис для персонализированной психолог�
 - `QuestionType`, `ChoiceOption`
 
 ### recommendation.py
-- `ContentCandidate` — кандидат на рекомендацию
+- `ContentCandidate` — кандидат на рекомендацию (content_id, title, summary, url, topic, content_type, tags)
 - `RecommendationOffer` — оффер с материалами
 - `RecommendationReply` — ответ агента рекомендаций
+- `BlockRecommendation` — рекомендация для диагностического блока (body/mind/sex)
 
 ### rag_chat.py
 - `RagReference` — ссылка на источник из RAG
@@ -219,7 +227,8 @@ LLM-сервис для персонализированной психолог�
 - `DiagnosticBundle` — комплексная диагностика
 
 ### week_plan.py
-- `PlanItem`, `WeekPlan` — план на неделю
+- `PlanItem` — день плана (day, title, goal, instructions, tags, focus_area)
+- `WeekPlan` — план на 7 дней
 
 ---
 
@@ -241,7 +250,8 @@ LLM-сервис для персонализированной психолог�
 **Рекомендации материалов психолога:**
 - Анализ профиля пользователя
 - Выборка релевантных материалов из psychologist_content
-- Формирование офферов
+- Формирование персонализированных офферов
+- `generate_block_recommendations()` — генерация рекомендаций для диагностических блоков (body/mind/sex)
 
 ### rag_chat_agent.py
 **RAG-чат с контекстом:**
@@ -255,6 +265,12 @@ LLM-сервис для персонализированной психолог�
 - Формирование инсайтов и тегов
 - Сохранение результатов в user_memory (`diagnostic_bundle`) с поддержкой force-режима
 
+### diagnostic_workflow.py
+**Оркестратор диагностики и рекомендаций:**
+- Параллельный запуск диагностики и подбора контента через ThreadPoolExecutor
+- Кэширование результатов диагностики и рекомендаций раздельно
+- `run_diagnostic_with_recommendations()` — возвращает (bundle, диагностика_из_кэша, рекомендации, рекомендации_из_кэша)
+
 ### quiz_service.py
 **Управление квизом:**
 - Формирование вопросов
@@ -267,7 +283,7 @@ LLM-сервис для персонализированной психолог�
 - Запуск интерактивного квиза и запись ответов
 - Вызов обогащения profile_json (force-режим опционален)
 - Запуск диагностического агента с кэшированием результатов
-- Генерация недельного плана по тегам (--plan-tags) с возможностью force
+- Генерация недельного плана (--plan-tags опциональный, берутся из диагностики если не указан) с возможностью force
 - Вывод сводки в текстовом или JSON-формате
 
 ### dialog_summary.py
@@ -280,16 +296,22 @@ LLM-сервис для персонализированной психолог�
 - Поддерживающий диалог с эмпатией
 - Учет истории взаимодействий
 
-### diagnostic_agent.py
-**Диагностика состояния:**
-- Анализ по трем направлениям (body, mind, sex)
-- Формирование инсайтов и рекомендаций
-
 ### week_plan_agent.py
 **Планирование недели:**
-- Генерация персонализированных активностей
-- Учет приоритетов и возможностей
-- Сохранение результата в user_memory (`week_plan`) с поддержкой кэша/force-режима
+- Генерация 7-дневного плана на основе полного контекста пользователя (профиль, квиз, диагностика, теги)
+- Теги опциональны — если не указаны, извлекаются из диагностики автоматически
+- План содержит самостоятельные практики без привязки к платному контенту
+- Умное кэширование на основе хэша контекста (context_hash)
+- `run_week_plan_with_cache()` — возвращает (план, from_cache, использованные_теги)
+
+### bot/telegram_bot.py
+**Telegram-клиент (Aiogram):**
+- Команды `/start` + обработка email
+- Авторизация через `/entry`, прохождение квиза, автоматическое обогащение профиля
+- Диагностика: пошаговый выбор тегов из агентского ответа
+- Кнопка «Статус» показывает прогресс пользователя
+- Запускается отдельным процессом (`python -m bot.telegram_bot`), не входит в docker-compose
+- Зависимости ставятся из `requirements-bot.txt`
 
 ---
 
@@ -352,7 +374,7 @@ LLM-сервис для персонализированной психолог�
 **Образ API:**
 - Python 3.11+
 - pip install -r requirements.txt
-- Запуск через uvicorn
+- Запуск через uvicorn (для сервиса `api`), бот использует тот же образ с командой `python -m bot.telegram_bot`
 
 ---
 

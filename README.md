@@ -45,6 +45,7 @@ export VMESTE_DEMO_USER_ID=<uuid>       # пользователь для дем
 python -m app.cli.pipeline_cli --email demo@vmeste.io --quiz
 python -m app.cli.pipeline_cli --email demo@vmeste.io --profile
 python -m app.cli.pipeline_cli --email demo@vmeste.io --diagnostic
+# --plan-tags опциональный, теги берутся из диагностики если не указаны
 python -m app.cli.pipeline_cli --email demo@vmeste.io --week-plan --plan-tags "стресс, тревога"
 # Повторно с форсом:
 python -m app.cli.pipeline_cli --email demo@vmeste.io \
@@ -72,8 +73,22 @@ curl http://localhost:8000/quiz/questions
 curl -X POST http://localhost:8000/quiz/submit -H "Content-Type: application/json" -d '{"user_id":"<uuid>", "answers":[{"question_id":"age","value":"30"}, ...]}'
 curl -X POST http://localhost:8000/users/<uuid>/profile/enrich -H "Content-Type: application/json" -d '{}'
 curl -X POST http://localhost:8000/users/<uuid>/diagnostic/run -H "Content-Type: application/json" -d '{}'
+# selected_tags опциональный, если не указан — берутся теги из диагностики
 curl -X POST http://localhost:8000/users/<uuid>/week-plan/run -H "Content-Type: application/json" -d '{"selected_tags":["стресс","усталость"]}'
 ```
+
+## Telegram-бот (тест входа)
+- Настройте `.env`: `TELEGRAM_BOT_TOKEN=<token>`, `VMESTE_API_BASE`.
+- Установите зависимости бота (дополнительно к основным):
+  ```bash
+  pip install -r requirements-bot.txt
+  ```
+- Запустите API (`uvicorn app.main:app --reload` или `docker compose up`), затем:
+  ```bash
+  python -m bot.telegram_bot
+  ```
+- Бот (Aiogram) обрабатывает `/start`, просит email и вызывает `/entry`, показывает `is_new`, `quiz_completed`, `user_id`.
+- Доступные действия: прохождение квиза, запуск диагностики, просмотр статуса.
 
 ### API (21 эндпоинт)
 **Entry / Users**
@@ -86,7 +101,7 @@ curl -X POST http://localhost:8000/users/<uuid>/week-plan/run -H "Content-Type: 
 - `GET /users/{user_id}/quiz-profile`, `PUT /users/{user_id}/quiz-profile`
 
 **Diagnostic & Planning**
-- `POST /users/{user_id}/diagnostic/run`
+- `POST /users/{user_id}/diagnostic/run` — диагностика + персонализированные рекомендации контента
 - `POST /users/{user_id}/week-plan/run`
 
 **Sessions / Chat**
@@ -115,6 +130,7 @@ app/
 ├── services/
 │   ├── profile_enrichment.py
 │   ├── diagnostic_agent.py
+│   ├── diagnostic_workflow.py
 │   ├── week_plan_agent.py
 │   ├── recommendation_agent.py
 │   ├── therapy_agent.py
@@ -124,6 +140,8 @@ app/
     ├── models.py        # Схема БД
     ├── connection.py
     └── repositories/    # CRUD операции
+bot/
+└── telegram_bot.py       # Telegram-клиент для тестирования
 ```
 
 **Конфигурация:** config.py, .env, docker-compose.yml
