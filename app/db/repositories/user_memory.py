@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import logging
-from typing import Any, Mapping, MutableMapping
+from typing import Any, Mapping, MutableMapping, Sequence
 from uuid import UUID
 
 from psycopg.types.json import Json
@@ -79,6 +79,7 @@ def upsert_memory(payload: UserMemoryUpsert) -> UserMemory:
 QUIZ_PROFILE_KEY = "quiz_profile"
 DIAGNOSTIC_BUNDLE_KEY = "diagnostic_bundle"
 WEEK_PLAN_KEY = "week_plan"
+DIAGNOSTIC_RECOMMENDATIONS_KEY = "diagnostic_recommendations"
 
 
 __all__ = [
@@ -89,6 +90,8 @@ __all__ = [
     "upsert_quiz_profile",
     "get_diagnostic_bundle",
     "upsert_diagnostic_bundle",
+    "get_diagnostic_recommendations",
+    "upsert_diagnostic_recommendations",
     "get_week_plan",
     "upsert_week_plan",
 ]
@@ -248,6 +251,45 @@ def upsert_diagnostic_bundle(user_id: UUID, bundle: Mapping[str, Any]) -> dict[s
         )
     )
     return memory_data[DIAGNOSTIC_BUNDLE_KEY]
+
+
+def get_diagnostic_recommendations(user_id: UUID) -> list[dict[str, Any]] | None:
+    """Возвращает сохранённые рекомендации по диагностике."""
+
+    memory = get_memory(user_id)
+    if memory is None:
+        return None
+    payload = memory.memory_data.get(DIAGNOSTIC_RECOMMENDATIONS_KEY)
+    if isinstance(payload, list):
+        normalized: list[dict[str, Any]] = []
+        for entry in payload:
+            if isinstance(entry, MutableMapping):
+                normalized.append(dict(entry))
+        return normalized or None
+    return None
+
+
+def upsert_diagnostic_recommendations(
+    user_id: UUID,
+    recommendations: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Сохраняет рекомендации диагностического агента."""
+
+    memory = get_memory(user_id)
+    if memory:
+        memory_data = dict(memory.memory_data)
+    else:
+        memory_data = {}
+    memory_data = _ensure_memory_structure(memory_data)
+    normalized = [dict(entry) for entry in recommendations]
+    memory_data[DIAGNOSTIC_RECOMMENDATIONS_KEY] = normalized
+    upsert_memory(
+        UserMemoryUpsert(
+            user_id=user_id,
+            memory_data=memory_data,
+        )
+    )
+    return normalized
 
 
 def get_week_plan(user_id: UUID) -> dict[str, Any] | None:

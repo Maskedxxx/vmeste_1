@@ -22,9 +22,10 @@ from app.db.models import (
 )
 from app.db.repositories import chat_history, sessions, user_memory, users
 from app.models.diagnostic import DiagnosticBundle
+from app.models.recommendation import BlockRecommendation
 from app.models.quiz import QuizAnswer as QuizAnswerModel, QuizQuestion
 from app.models.week_plan import WeekPlan
-from app.services.diagnostic_agent import run_diagnostic_with_cache
+from app.services.diagnostic_workflow import run_diagnostic_with_recommendations
 from app.services.profile_enrichment import EnsureProfileResult, ensure_profile_for_user
 from app.services.quiz_service import DEFAULT_QUIZ_VERSION, get_quiz_questions, run_quiz_for_user, validate_answers
 from app.services.week_plan_agent import run_week_plan_with_cache
@@ -135,12 +136,14 @@ class DiagnosticResponse(BaseModel):
 
     bundle: DiagnosticBundle
     from_cache: bool
+    recommendations: list[BlockRecommendation]
+    recommendations_from_cache: bool
 
 
 class WeekPlanRequest(BaseModel):
     """Параметры запуска генерации недельного плана."""
 
-    selected_tags: list[str] = Field(..., min_length=1)
+    selected_tags: list[str] | None = Field(default=None, description="Опциональные теги от пользователя.")
     force: bool = False
 
 
@@ -149,7 +152,7 @@ class WeekPlanResponse(BaseModel):
 
     plan: WeekPlan
     from_cache: bool
-    tags: list[str]
+    tags: list[str] = Field(default_factory=list)
 
 
 class EntryRequest(BaseModel):
@@ -337,8 +340,16 @@ def run_diagnostic_endpoint(user_id: UUID, payload: DiagnosticRequest) -> Diagno
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Profile is empty. Run enrichment first.",
         )
-    bundle, from_cache = run_diagnostic_with_cache(user_id=user_id, force=payload.force)
-    return DiagnosticResponse(bundle=bundle, from_cache=from_cache)
+    bundle, diag_from_cache, recommendations, rec_from_cache = run_diagnostic_with_recommendations(
+        user_id=user_id,
+        force=payload.force,
+    )
+    return DiagnosticResponse(
+        bundle=bundle,
+        from_cache=diag_from_cache,
+        recommendations=recommendations,
+        recommendations_from_cache=rec_from_cache,
+    )
 
 
 @app.post(
@@ -358,7 +369,7 @@ def run_week_plan_endpoint(user_id: UUID, payload: WeekPlanRequest) -> WeekPlanR
         )
 
     try:
-        plan, from_cache = run_week_plan_with_cache(
+        plan, from_cache, used_tags = run_week_plan_with_cache(
             user_id=user_id,
             tags=payload.selected_tags,
             force=payload.force,
@@ -366,7 +377,7 @@ def run_week_plan_endpoint(user_id: UUID, payload: WeekPlanRequest) -> WeekPlanR
     except ValueError as error:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
 
-    return WeekPlanResponse(plan=plan, from_cache=from_cache, tags=payload.selected_tags)
+    return WeekPlanResponse(plan=plan, from_cache=from_cache, tags=used_tags)
 
 
 @app.post("/sessions", response_model=Session, tags=["sessions"], status_code=status.HTTP_201_CREATED)
