@@ -491,9 +491,12 @@ def update_quiz_profile(user_id: UUID, payload: QuizProfileUpdate) -> QuizProfil
 if __name__ == "__main__":
     import uvicorn
 
+    from config import get_settings
+
+    settings = get_settings()
     uvicorn.run(
         "app.main:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=True,
+        host=settings.api_host,
+        port=settings.api_port,
+        reload=settings.app_env == "development",
     )

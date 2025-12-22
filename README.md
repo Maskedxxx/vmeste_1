@@ -20,11 +20,45 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 curl http://localhost:8000/health  # {"status":"ok"}
 ```
 
-### Запуск в контейнере
+### Запуск в контейнере (development)
 1. Создайте файл окружения: `cp .env.example .env`
 2. Поднимите сервисы: `docker compose up --build`
 3. API станет доступным по `http://localhost:8000`, Chroma — на `http://localhost:8001`, PostgreSQL — на `localhost:5432`
 4. Для остановки исполните `docker compose down` (данные БД сохраняются в named-volume `postgres_data`)
+
+### Production деплой
+Для production используется отдельный compose-файл без контейнера PostgreSQL (используется внешняя БД сервера).
+
+```bash
+# 1. Клонировать репозиторий
+git clone https://github.com/myosminozhka-ru/VmesteMentor.git
+cd VmesteMentor
+
+# 2. Настроить окружение
+cp .env.example .env
+# Отредактировать .env:
+#   APP_ENV=production
+#   POSTGRES_HOST=<адрес_сервера_БД>
+#   POSTGRES_PASSWORD=<надёжный_пароль>
+#   API_PORT=<свободный_порт>        # если 8000 занят
+#   CHROMA_PORT=<свободный_порт>     # если 8001 занят
+#   OPENAI_API_KEY=sk-...
+
+# 3. Инициализировать БД (выполнить db/init.sql на сервере PostgreSQL)
+psql -h $POSTGRES_HOST -U $POSTGRES_USER -d $POSTGRES_DB -f db/init.sql
+
+# 4. Запустить сервисы
+docker compose -f docker-compose.prod.yml up --build -d
+
+# 5. Проверить
+curl http://127.0.0.1:8000/health  # {"status":"ok"}
+```
+
+**Особенности production-конфига:**
+- Порты доступны только на `127.0.0.1` (не публично) — доступ через reverse proxy (nginx/traefik)
+- PostgreSQL контейнер отсутствует — используется внешняя БД
+- Healthcheck для мониторинга
+- `restart: unless-stopped` для автоперезапуска
 
 ### Подготовка окружения
 ```bash

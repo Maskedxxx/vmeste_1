@@ -23,7 +23,10 @@ class Settings(BaseSettings):
         description="Текущее окружение приложения.",
     )
 
-    postgres_host: str = Field("vmeste-postgres", alias="POSTGRES_HOST")
+    api_host: str = Field("0.0.0.0", alias="API_HOST")
+    api_port: int = Field(8000, alias="API_PORT")
+
+    postgres_host: str = Field("localhost", alias="POSTGRES_HOST")
     postgres_port: int = Field(5432, alias="POSTGRES_PORT")
     postgres_db: str = Field("vmeste", alias="POSTGRES_DB")
     postgres_user: str = Field("vmeste", alias="POSTGRES_USER")
