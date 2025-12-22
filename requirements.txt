@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+psycopg[binary]
+psycopg-pool
+pydantic
+pydantic[email]
+pydantic-settings
+requests
+openai
+chromadb

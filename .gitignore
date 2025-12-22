@@ -1,0 +1,39 @@
+Legacy/
+.DS_Store
+tmp_pdf.txt
+data/
+scripts/
+!scripts/conversation_runner.py
+
+# Personal notes
+docs/
+
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+.venv/
+venv/
+
+# Environment files
+.env
+.env.*
+
+# Tooling
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Test coverage
+.coverage
+htmlcov/
+.coverage.*
+
+# IDE
+.idea/
+.vscode/

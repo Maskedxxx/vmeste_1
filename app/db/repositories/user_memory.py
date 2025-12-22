@@ -1,0 +1,337 @@
+# app/db/repositories/user_memory.py
+# --- agent_meta ---
+# role: user-memory-repository
+# contract: чтение и обновление долговременной памяти пользователя
+# owner: backend-core
+# --- /agent_meta ---
+
+"""Репозиторий для работы с user_memory."""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+import logging
+from typing import Any, Mapping, MutableMapping, Sequence
+from uuid import UUID
+
+from psycopg.types.json import Json
+
+from app.db.connection import fetch_one
+from app.db.models import (
+    QuizAnswer,
+    QuizAnswerUpdate,
+    QuizProfile,
+    QuizProfileUpdate,
+    UserMemory,
+    UserMemoryUpsert,
+)
+
+
+logger = logging.getLogger("vmeste.db.repositories.user_memory")
+
+MEMORY_COLUMNS = (
+    "memory_id",
+    "user_id",
+    "memory_data",
+    "created_at",
+    "updated_at",
+)
+
+
+def get_memory(user_id: UUID) -> UserMemory | None:
+    """Возвращает память пользователя или None."""
+    logger.debug("Чтение памяти user_id=%s", user_id)
+    query = f"""
+        SELECT {", ".join(MEMORY_COLUMNS)}
+        FROM user_memory
+        WHERE user_id = %(user_id)s
+    """
+    row = fetch_one(query, {"user_id": user_id})
+    return UserMemory.model_validate(row) if row else None
+
+
+def upsert_memory(payload: UserMemoryUpsert) -> UserMemory:
+    """Создаёт или обновляет память пользователя."""
+    logger.info("Обновление памяти user_id=%s", payload.user_id)
+    query = f"""
+        INSERT INTO user_memory (user_id, memory_data)
+        VALUES (%(user_id)s, %(memory_data)s)
+        ON CONFLICT (user_id)
+        DO UPDATE SET
+            memory_data = EXCLUDED.memory_data,
+            updated_at = NOW()
+        RETURNING {", ".join(MEMORY_COLUMNS)}
+    """
+    row = fetch_one(
+        query,
+        {
+            "user_id": payload.user_id,
+            "memory_data": Json(payload.memory_data),
+        },
+    )
+    if row is None:
+        msg = "Не удалось обновить память пользователя"
+        logger.error(msg)
+        raise RuntimeError(msg)
+    return UserMemory.model_validate(row)
+
+
+QUIZ_PROFILE_KEY = "quiz_profile"
+DIAGNOSTIC_BUNDLE_KEY = "diagnostic_bundle"
+WEEK_PLAN_KEY = "week_plan"
+DIAGNOSTIC_RECOMMENDATIONS_KEY = "diagnostic_recommendations"
+
+
+__all__ = [
+    "get_memory",
+    "upsert_memory",
+    "append_conversation_entry",
+    "get_quiz_profile",
+    "upsert_quiz_profile",
+    "get_diagnostic_bundle",
+    "upsert_diagnostic_bundle",
+    "get_diagnostic_recommendations",
+    "upsert_diagnostic_recommendations",
+    "get_week_plan",
+    "upsert_week_plan",
+]
+
+
+def _ensure_memory_structure(memory_data: MutableMapping[str, Any]) -> MutableMapping[str, Any]:
+    """Гарантирует наличие базовых ключей в памяти."""
+    if "conversation_history" not in memory_data:
+        memory_data["conversation_history"] = []
+    if QUIZ_PROFILE_KEY not in memory_data:
+        memory_data[QUIZ_PROFILE_KEY] = QuizProfile().model_dump()
+    return memory_data
+
+
+def append_conversation_entry(
+    user_id: UUID,
+    entry: dict[str, Any],
+    max_length: int = 2000,
+) -> UserMemory:
+    """Добавляет сообщение в conversation_history с ограничением длины."""
+    logger.debug("Добавление записи в память user_id=%s", user_id)
+    memory = get_memory(user_id)
+    memory_data: MutableMapping[str, Any]
+    if memory:
+        memory_data = dict(memory.memory_data)
+    else:
+        memory_data = {}
+    memory_data = _ensure_memory_structure(memory_data)
+
+    history: list[dict[str, Any]] = list(memory_data["conversation_history"])
+
+    timestamp = entry.get("timestamp")
+    if timestamp is None:
+        timestamp = datetime.now(tz=timezone.utc).isoformat()
+    else:
+        if isinstance(timestamp, datetime):
+            timestamp = timestamp.astimezone(timezone.utc).isoformat()
+        else:
+            timestamp = str(timestamp)
+    entry["timestamp"] = timestamp
+    history.append(entry)
+    if len(history) > max_length:
+        history = history[-max_length:]
+    memory_data["conversation_history"] = history
+
+    return upsert_memory(
+        UserMemoryUpsert(
+            user_id=user_id,
+            memory_data=dict(memory_data),
+        )
+    )
+
+
+def get_quiz_profile(user_id: UUID) -> QuizProfile | None:
+    """Возвращает квиз-профиль пользователя, если он есть."""
+    memory = get_memory(user_id)
+    if memory is None:
+        return None
+    raw_profile = memory.memory_data.get(QUIZ_PROFILE_KEY)
+    if not isinstance(raw_profile, MutableMapping):
+        return None
+    return QuizProfile.model_validate(raw_profile)
+
+
+def upsert_quiz_profile(user_id: UUID, payload: QuizProfileUpdate) -> QuizProfile:
+    """Обновляет данные квиз-профиля пользователя."""
+    logger.info("Обновление quiz_profile user_id=%s", user_id)
+    memory = get_memory(user_id)
+    memory_data: MutableMapping[str, Any]
+    if memory:
+        memory_data = dict(memory.memory_data)
+    else:
+        memory_data = {}
+    memory_data = _ensure_memory_structure(memory_data)
+
+    current_profile_raw = memory_data.get(QUIZ_PROFILE_KEY)
+    current_profile = QuizProfile.model_validate(current_profile_raw)
+    updated_profile = _merge_quiz_profile(current_profile, payload)
+    memory_data[QUIZ_PROFILE_KEY] = updated_profile.model_dump(mode="json")
+
+    upsert_memory(
+        UserMemoryUpsert(
+            user_id=user_id,
+            memory_data=dict(memory_data),
+        )
+    )
+    return updated_profile
+
+
+def _merge_quiz_profile(existing: QuizProfile, update: QuizProfileUpdate) -> QuizProfile:
+    """Возвращает объединённый квиз-профиль."""
+    version = update.version if update.version is not None else existing.version
+    completed = update.completed if update.completed is not None else existing.completed
+    completed_at = (
+        update.completed_at
+        if update.completed_at is not None
+        else existing.completed_at
+    )
+
+    meta = dict(existing.meta)
+    if update.meta:
+        meta.update(update.meta)
+
+    answers = dict(existing.answers)
+    if update.answers:
+        for question_id, answer_update in update.answers.items():
+            answers[question_id] = _build_quiz_answer(answer_update)
+
+    if isinstance(completed_at, str):
+        completed_dt = datetime.fromisoformat(completed_at)
+    else:
+        completed_dt = completed_at
+
+    return QuizProfile(
+        version=version,
+        completed=completed,
+        completed_at=completed_dt,
+        answers=answers,
+        meta=meta,
+    )
+
+
+def _build_quiz_answer(update: QuizAnswerUpdate) -> QuizAnswer:
+    """Формирует полный ответ квиза."""
+    updated_at = update.updated_at or datetime.now(tz=timezone.utc)
+    return QuizAnswer(
+        value=update.value,
+        confidence=update.confidence,
+        updated_at=updated_at,
+    )
+
+
+def get_diagnostic_bundle(user_id: UUID) -> dict[str, Any] | None:
+    """Возвращает сохранённый диагностический пакет, если он есть."""
+    memory = get_memory(user_id)
+    if memory is None:
+        return None
+    bundle = memory.memory_data.get(DIAGNOSTIC_BUNDLE_KEY)
+    if isinstance(bundle, MutableMapping):
+        return dict(bundle)
+    return None
+
+
+def upsert_diagnostic_bundle(user_id: UUID, bundle: Mapping[str, Any]) -> dict[str, Any]:
+    """Сохраняет диагностический пакет в user_memory."""
+    memory = get_memory(user_id)
+    if memory:
+        memory_data = dict(memory.memory_data)
+    else:
+        memory_data = {}
+    memory_data = _ensure_memory_structure(memory_data)
+    memory_data[DIAGNOSTIC_BUNDLE_KEY] = dict(bundle)
+    upsert_memory(
+        UserMemoryUpsert(
+            user_id=user_id,
+            memory_data=memory_data,
+        )
+    )
+    return memory_data[DIAGNOSTIC_BUNDLE_KEY]
+
+
+def get_diagnostic_recommendations(user_id: UUID) -> list[dict[str, Any]] | None:
+    """Возвращает сохранённые рекомендации по диагностике."""
+
+    memory = get_memory(user_id)
+    if memory is None:
+        return None
+    payload = memory.memory_data.get(DIAGNOSTIC_RECOMMENDATIONS_KEY)
+    if isinstance(payload, list):
+        normalized: list[dict[str, Any]] = []
+        for entry in payload:
+            if isinstance(entry, MutableMapping):
+                normalized.append(dict(entry))
+        return normalized or None
+    return None
+
+
+def upsert_diagnostic_recommendations(
+    user_id: UUID,
+    recommendations: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Сохраняет рекомендации диагностического агента."""
+
+    memory = get_memory(user_id)
+    if memory:
+        memory_data = dict(memory.memory_data)
+    else:
+        memory_data = {}
+    memory_data = _ensure_memory_structure(memory_data)
+    normalized = [dict(entry) for entry in recommendations]
+    memory_data[DIAGNOSTIC_RECOMMENDATIONS_KEY] = normalized
+    upsert_memory(
+        UserMemoryUpsert(
+            user_id=user_id,
+            memory_data=memory_data,
+        )
+    )
+    return normalized
+
+
+def get_week_plan(user_id: UUID) -> dict[str, Any] | None:
+    """Возвращает сохранённый недельный план, если он есть."""
+    memory = get_memory(user_id)
+    if memory is None:
+        return None
+    plan = memory.memory_data.get(WEEK_PLAN_KEY)
+    if isinstance(plan, MutableMapping):
+        return dict(plan)
+    return None
+
+
+def upsert_week_plan(user_id: UUID, plan_payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Сохраняет недельный план в user_memory."""
+    memory = get_memory(user_id)
+    if memory:
+        memory_data = dict(memory.memory_data)
+    else:
+        memory_data = {}
+    memory_data = _ensure_memory_structure(memory_data)
+    memory_data[WEEK_PLAN_KEY] = dict(plan_payload)
+    upsert_memory(
+        UserMemoryUpsert(
+            user_id=user_id,
+            memory_data=memory_data,
+        )
+    )
+    return memory_data[WEEK_PLAN_KEY]
+
+
+if __name__ == "__main__":
+    from uuid import uuid4
+    from app.db.repositories.users import create_user, UserCreate
+
+    demo_user = create_user(
+        UserCreate(external_id=f"memory-demo-{uuid4()}", email="memory@example.com")
+    )
+    memory = upsert_memory(
+        UserMemoryUpsert(
+            user_id=demo_user.user_id,
+            memory_data={"stress_level": "high"},
+        )
+    )
+    print("Память обновлена:", memory.memory_id)
