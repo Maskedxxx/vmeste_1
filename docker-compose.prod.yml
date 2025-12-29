@@ -1,39 +1,41 @@
 # docker-compose.prod.yml
-# Production: внешний PostgreSQL, порты только на localhost
+# Production: внешний PostgreSQL на хосте, порты только на localhost
 
 services:
-api:
+  api:
     build: .
     container_name: vmeste-api
     restart: unless-stopped
     env_file:
-    - .env
+      - .env
     environment:
-    - APP_ENV=production
+      - APP_ENV=production
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
-    - "127.0.0.1:${API_PORT:-8000}:8000"
+      - "127.0.0.1:${API_PORT:-8000}:8000"
     depends_on:
-    - chroma
+      - chroma
     healthcheck:
-    test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-    interval: 30s
-    timeout: 10s
-    retries: 3
-    start_period: 10s
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
 
-chroma:
+  chroma:
     image: ghcr.io/chroma-core/chroma:latest
     container_name: vmeste-chroma
     restart: unless-stopped
     ports:
-    - "127.0.0.1:${CHROMA_PORT:-8001}:8000"
+      - "127.0.0.1:${CHROMA_PORT:-8001}:8000"
     volumes:
-    - chroma_data:/chroma/.chroma
+      - chroma_data:/chroma/.chroma
     healthcheck:
-    test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
-    interval: 30s
-    timeout: 10s
-    retries: 3
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
 volumes:
-chroma_data:
+  chroma_data:
