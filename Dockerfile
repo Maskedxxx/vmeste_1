@@ -16,6 +16,9 @@ COPY config.py .
 COPY app ./app
 COPY bot ./bot
 COPY data ./data
+COPY db ./db
 COPY seed_psychologist_content.py .
+COPY entrypoint.sh .
+RUN chmod +x entrypoint.sh
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["./entrypoint.sh"]
