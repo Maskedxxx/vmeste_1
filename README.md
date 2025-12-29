@@ -36,29 +36,40 @@ cd VmesteMentor
 
 # 2. Настроить окружение
 cp .env.example .env
-# Отредактировать .env:
-#   APP_ENV=production
+nano .env
+# Заполнить ВСЕ пустые поля:
+#   API_PORT=<свободный_порт>
+#   CHROMA_PORT=<свободный_порт>
 #   POSTGRES_HOST=<адрес_сервера_БД>
-#   POSTGRES_PASSWORD=<надёжный_пароль>
-#   API_PORT=<свободный_порт>        # если 8000 занят
-#   CHROMA_PORT=<свободный_порт>     # если 8001 занят
-#   OPENAI_API_KEY=sk-...
+#   POSTGRES_USER=<пользователь>
+#   POSTGRES_PASSWORD=<пароль>
+#   OPENAI_API_KEY=<ключ>
+#   TELEGRAM_BOT_TOKEN=<токен_бота>
 
-# 3. Инициализировать БД (выполнить db/init.sql на сервере PostgreSQL)
+# 3. Инициализировать БД (выполнить на сервере PostgreSQL)
 psql -h $POSTGRES_HOST -U $POSTGRES_USER -d $POSTGRES_DB -f db/init.sql
 
 # 4. Запустить сервисы
 docker compose -f docker-compose.prod.yml up --build -d
 
-# 5. Проверить
-curl http://127.0.0.1:8000/health  # {"status":"ok"}
-```
+# 5. Проверить API
+curl http://127.0.0.1:$API_PORT/health  # {"status":"ok"}
 
-**Особенности production-конфига:**
-- Порты доступны только на `127.0.0.1` (не публично) — доступ через reverse proxy (nginx/traefik)
+# 6. Загрузить тестовые данные
+docker exec vmeste-api python seed_psychologist_content.py
+
+# 7. Запустить Telegram-бота (в фоне)
+docker exec -d vmeste-api python -m bot.telegram_bot
+
+# Логи бота:
+docker exec vmeste-api ps aux | grep telegram
+docker logs vmeste-api
+
+Особенности production-конфига:
+- Порты доступны только на 127.0.0.1 — доступ через reverse proxy (nginx/traefik)
 - PostgreSQL контейнер отсутствует — используется внешняя БД
 - Healthcheck для мониторинга
-- `restart: unless-stopped` для автоперезапуска
+- restart: unless-stopped для автоперезапуска
 
 ### Подготовка окружения
 ```bash
