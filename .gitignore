@@ -1,7 +1,8 @@
 Legacy/
 .DS_Store
 tmp_pdf.txt
-data/
+data/*
+!data/test_data/
 scripts/
 !scripts/conversation_runner.py
 
@@ -38,3 +39,7 @@ htmlcov/
 # IDE
 .idea/
 .vscode/
+*.code-workspace
+
+# AI tools
+.gemini/
