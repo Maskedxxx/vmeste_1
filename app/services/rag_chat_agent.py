@@ -3,10 +3,11 @@
 # role: rag-chat-agent
 # contract: строит ответ на вопрос пользователя с учётом профиля, истории и RAG-контекста
 # owner: backend-core
-# last_reviewed: 2025-11-11
+# last_reviewed: 2025-12-30
 # interfaces:
 #   - RagChatAgent.generate_reply(...)
-#   - run_rag_chat(user_id: UUID, user_message: str, history_limit: int = 4)
+#   - run_rag_chat(user_id, user_message, topic_filter: body|mind|sex)
+#   - TopicType = Literal["body", "mind", "sex"]
 # --- /agent_meta ---
 
 """RAG-агент для ответов на вопросы пользователей по материалам психолога."""
@@ -17,7 +18,7 @@ import argparse
 import json
 import logging
 import os
-from typing import Any, Sequence
+from typing import Any, Literal, Sequence
 from uuid import UUID
 
 import chromadb
@@ -29,6 +30,9 @@ from config import get_settings
 
 
 logger = logging.getLogger("vmeste.services.rag_chat_agent")
+
+# Типы тем для чата
+TopicType = Literal["body", "mind", "sex"]
 
 SYSTEM_PROMPT = (
     "Ты контентный агент психологической платформы «Вместе». "
@@ -70,6 +74,7 @@ class RagChatAgent:
         summary: DialogSummary | None,
         recent_messages: Sequence[dict[str, str]],
         user_message: str,
+        topic_filter: TopicType | None = None,
     ) -> RagReply:
         """Строит ответ на основе профиля, истории и найденных чанков."""
 
@@ -78,7 +83,7 @@ class RagChatAgent:
         if not query_text:
             raise RuntimeError("Нет пользовательского текста для построения RAG-запроса")
 
-        retrieved = self._search_chunks(query_text=query_text, limit=2)
+        retrieved = self._search_chunks(query_text=query_text, limit=3, topic_filter=topic_filter)
         messages = self._build_messages(
             profile=profile,
             summary=summary,
@@ -97,19 +102,39 @@ class RagChatAgent:
             raise RuntimeError("LLM не вернула ответ RAG-агента")
         return reply
 
-    def _search_chunks(self, *, query_text: str, limit: int) -> list[RagReference]:
+    def _search_chunks(
+        self,
+        *,
+        query_text: str,
+        limit: int,
+        topic_filter: TopicType | None = None,
+    ) -> list[RagReference]:
         embedding = self._client.embeddings.create(
             model=self._embedding_model,
             input=query_text,
         ).data[0].embedding
 
-        result = self._collection.query(
-            query_embeddings=[embedding],
-            n_results=limit,
-        )
+        query_kwargs: dict[str, Any] = {
+            "query_embeddings": [embedding],
+            "n_results": limit,
+            "include": ["documents", "metadatas", "distances"],
+        }
+        if topic_filter:
+            query_kwargs["where"] = {"topic": topic_filter}
+
+        result = self._collection.query(**query_kwargs)
         ids = result.get("ids", [[]])[0]
         texts = result.get("documents", [[]])[0]
         metadatas = result.get("metadatas", [[]])[0]
+        distances = result.get("distances", [[]])[0]
+
+        # Логирование результатов поиска
+        logger.info("=" * 80)
+        logger.info("RAG ПОИСК | Коллекция: %s | Тема: %s", self._collection.name, topic_filter or "все")
+        logger.info("Запрос: \"%s\"", query_text[:100])
+        logger.info("-" * 80)
+        logger.info("| %-3s | %-18s | %-7s | %-10s | %-30s |", "Top", "Source", "Chunk", "Similarity", "Preview")
+        logger.info("-" * 80)
 
         references: list[RagReference] = []
         for idx, chunk_id in enumerate(ids):
@@ -117,6 +142,18 @@ class RagChatAgent:
                 continue
             metadata = metadatas[idx] or {}
             preview = texts[idx][:260].strip() if texts and idx < len(texts) else ""
+
+            # Cosine similarity = 1 - distance
+            similarity = 1 - distances[idx] if idx < len(distances) else 0.0
+            source_id = metadata.get("source_id", "unknown")
+            chunk_index = metadata.get("chunk_index", 0)
+            short_preview = texts[idx][:30].replace("\n", " ") if texts and idx < len(texts) else ""
+
+            logger.info(
+                "| %-3d | %-18s | %-7d | %-10.3f | %-30s |",
+                idx + 1, source_id, chunk_index, similarity, short_preview
+            )
+
             references.append(
                 RagReference(
                     chunk_id=chunk_id,
@@ -125,6 +162,8 @@ class RagChatAgent:
                     topic=metadata.get("topic"),
                 )
             )
+
+        logger.info("=" * 80)
         return references
 
     @staticmethod
@@ -210,22 +249,32 @@ def run_rag_chat(
     user_id: UUID,
     user_message: str,
     history_limit: int = 4,
+    topic_filter: TopicType | None = None,
     service: RagChatAgent | None = None,
 ) -> RagReply:
-    """Подготавливает данные, вызывает RAG-агента и возвращает ответ."""
+    """Подготавливает данные, вызывает RAG-агента и возвращает ответ.
+
+    Args:
+        user_id: ID пользователя.
+        user_message: Сообщение пользователя.
+        history_limit: Лимит сообщений из истории.
+        topic_filter: Фильтр по теме (body/mind/sex) для RAG-поиска.
+        service: Опциональный экземпляр RagChatAgent.
+    """
     profile = _load_profile(user_id)
     summary = _load_summary(user_id)
     recent = _load_recent_messages(user_id, limit=history_limit)
     if user_message:
         recent.append({"role": "user", "text": user_message, "timestamp": "pending"})
 
-    logger.info("RAG-агент стартовал для user_id=%s", user_id)
+    logger.info("RAG-агент стартовал для user_id=%s, topic=%s", user_id, topic_filter)
     service = service or RagChatAgent()
     return service.generate_reply(
         profile=profile,
         summary=summary,
         recent_messages=recent,
         user_message=user_message,
+        topic_filter=topic_filter,
     )
 
 
