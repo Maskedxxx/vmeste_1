@@ -17,7 +17,7 @@ COPY app ./app
 COPY bot ./bot
 COPY data ./data
 COPY db ./db
-COPY seed_psychologist_content.py .
+COPY scripts ./scripts
 COPY entrypoint.sh .
 RUN chmod +x entrypoint.sh
 

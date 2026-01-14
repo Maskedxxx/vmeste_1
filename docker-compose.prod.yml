@@ -30,7 +30,8 @@ services:
     ports:
       - "127.0.0.1:${CHROMA_PORT:-8001}:8000"
     volumes:
-      - chroma_data:/chroma/.chroma
+      # ВАЖНО: ChromaDB сохраняет данные в /data
+      - chroma_data:/data
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
       interval: 30s
