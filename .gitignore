@@ -5,6 +5,7 @@ data/*
 !data/test_data/
 scripts/
 !scripts/conversation_runner.py
+!scripts/content_pipeline.py
 
 # Personal notes
 docs/
@@ -43,3 +44,7 @@ htmlcov/
 
 # AI tools
 .gemini/
+.claude/
+
+# Temp working folder
+temp_gdrive/
