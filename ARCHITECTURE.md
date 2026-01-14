@@ -4,8 +4,8 @@
 
 LLM-сервис для персонализированной психологической поддержки на базе FastAPI с PostgreSQL, реализующий паттерн Repository для доступа к данным.
 
-**Версия:** 0.3.0  
-**Стек:** FastAPI + PostgreSQL + psycopg3 + Pydantic v2 + OpenAI API
+**Версия:** 0.4.0
+**Стек:** FastAPI + PostgreSQL + psycopg3 + Pydantic v2 + OpenAI API + Chroma (RAG)
 
 ---
 
@@ -24,9 +24,8 @@ LLM-сервис для персонализированной психолог�
 ├── bot/                         # Внешние клиенты (Telegram и т.д.)
 │   └── telegram_bot.py          # Aiogram-бот для теста входа
 ├── config.py                    # Настройки через Pydantic Settings
-├── API_REFERENCE.md             # Документ с описанием REST API
 ├── db/init.sql                  # Схема БД
-├── scripts/                     # CLI утилиты и демо
+├── scripts/                     # Утилиты и вспомогательные скрипты
 ├── tests/                       # Тесты (pytest + coverage)
 └── docker-compose.yml           # Оркестрация (api, postgres, chroma, bot)
 ```
@@ -138,56 +137,45 @@ LLM-сервис для персонализированной психолог�
 #### psychologist_content.py
 **Каталог материалов:**
 - `list_available(limit)` → list[dict] — выборка активных материалов психолога (включая url)
+- `get_by_doc_id(doc_id)` → PsychologistContent | None — получить по ID документа
+- `create(payload)` → PsychologistContent — создать запись каталога
+
+#### sources.py
+**Провайдеры контента (откуда загружен материал):**
+- `get_by_type(source_type)` → Source | None — найти провайдер по типу (manual, yandex_disk и т.д.)
+- `create(payload)` → Source — создать нового провайдера
+
+#### documents.py
+**Исходные документы:**
+- `exists_by_slug(slug)` → bool — проверка существования по slug
+- `get_by_slug(slug)` → Document | None — получить документ по slug
+- `create(payload)` → Document — создать документ (slug, title, raw_text)
+
+#### content_chunks.py
+**Чанки контента для RAG:**
+- `create_batch(chunks)` → list[ContentChunk] — массовое создание чанков
+- `get_by_doc_id(doc_id)` → list[ContentChunk] — все чанки документа
+
+#### chunk_embeddings_meta.py
+**Метаданные эмбеддингов:**
+- `create_batch(metas)` → list[ChunkEmbeddingMeta] — массовое создание метаданных
+- Связывает chunk_id с chroma_id в ChromaDB
 
 ---
 
-## API Endpoints (app/main.py)
+## API Endpoints
 
-**Базовые:**
-- `GET /health` → HealthResponse — проверка работоспособности
-- `POST /entry` → EntryResponse — проверить пользователя по email, создать при отсутствии и вернуть `is_new`, `quiz_completed`
+Полное описание API см. в **README.md** раздел "Использование бота" или Swagger UI (`/docs`).
 
-**Пользователи (users):**
-- `POST /users` → User — создать или вернуть существующего по email
-- `GET /users/email/{email}` → User — получить по email
-- `GET /users/{user_id}` → User — получить по UUID
-- `PUT /users/{user_id}/profile` → User — обновить profile_json
-- `POST /users/{user_id}/profile/enrich` → ProfileEnrichmentResponse — запустить LLM-обогащение profile_json
-
-**Сессии (sessions):**
-- `POST /sessions` → Session — создать сессию
-- `GET /sessions/{user_id}/active` → Session | None — активная сессия
-- `POST /sessions/{session_id}/close` → Session — завершить сессию
-- `PATCH /sessions/{session_id}/state` → Session — обновить state_json
-
-**Чат (chat):**
-- `POST /sessions/{session_id}/messages` → ChatMessage — записать сообщение + автоматически в user_memory
-- `GET /sessions/{session_id}/messages` → list[ChatMessage] — история сессии
-- `GET /users/{user_id}/messages` → list[ChatMessage] — история пользователя
-
-**Память (memory):**
-- `GET /users/{user_id}/memory` → UserMemory | None — получить memory_data
-- `PUT /users/{user_id}/memory` → UserMemory — обновить memory_data
-
-**Квиз:**
-- `GET /users/{user_id}/quiz-profile` → QuizProfile | None — получить ответы квиза
-- `PUT /users/{user_id}/quiz-profile` → QuizProfile — обновить ответы
-- `GET /quiz/questions` → list[QuizQuestion] — получить текст и типы вопросов
-- `POST /quiz/submit` → QuizSubmitResponse — сохранить ответы пользователя (force опционален)
-
-**Диагностика:**
-- `POST /users/{user_id}/diagnostic/run` → DiagnosticResponse — диагностика + персонализированные рекомендации контента (с кэшированием)
-
-**Планирование:**
-- `POST /users/{user_id}/week-plan/run` → WeekPlanResponse — построить план на неделю по тегам
-
-**Request/Response модели:**
-- `HealthResponse`, `CloseSessionRequest`, `UpdateStateRequest`, `EntryRequest`, `EntryResponse`
-- `ProfileEnrichmentRequest`, `ProfileEnrichmentResponse`
-- `QuizAnswerRequest`, `QuizSubmitRequest`, `QuizSubmitResponse`
-- `DiagnosticRequest`, `DiagnosticResponse`
-- `WeekPlanRequest`, `WeekPlanResponse`
-- `ChatMessageRequest`, `MemoryRequest`, `ProfileRequest`
+Краткий список:
+- `GET /health` — проверка работоспособности
+- `POST /entry` — авторизация по email
+- `POST /users`, `GET /users/{id}` — управление пользователями
+- `POST /sessions`, `GET /sessions/{user_id}/active` — управление сессиями
+- `POST /chat` — RAG-чат по темам (body/mind/sex)
+- `POST /users/{id}/diagnostic/run` — диагностика
+- `POST /users/{id}/week-plan/run` — план на 7 дней
+- `GET /quiz/questions`, `POST /quiz/submit` — квиз
 
 ---
 
@@ -277,15 +265,6 @@ LLM-сервис для персонализированной психолог�
 - Валидация ответов
 - Сохранение результатов в user_memory через `run_quiz_for_user`
 
-### app/cli/pipeline_cli.py
-**CLI пайплайн:**
-- Проверка шага входа (создание/поиск пользователя, статус квиза)
-- Запуск интерактивного квиза и запись ответов
-- Вызов обогащения profile_json (force-режим опционален)
-- Запуск диагностического агента с кэшированием результатов
-- Генерация недельного плана (--plan-tags опциональный, берутся из диагностики если не указан) с возможностью force
-- Вывод сводки в текстовом или JSON-формате
-
 ### dialog_summary.py
 **Саммаризация диалогов:**
 - Анализ истории сообщений
@@ -314,23 +293,6 @@ LLM-сервис для персонализированной психолог�
 - Зависимости ставятся из `requirements-bot.txt`
 
 ---
-
-## Скрипты (scripts/)
-
-### chat_cli.py
-**Интерактивный чат с LLM:**
-- Загружает историю из user_memory
-- Формирует промпт с полной историей (до 40 сообщений)
-- Отправляет в OpenAI GPT-4.1 mini
-- Автоматически сохраняет в chat_history и user_memory
-
-**Системный промпт:** эмпатичный ассистент с доступом к истории разговоров
-
-### quiz_demo.py
-**Демонстрация семейного квиза:**
-- Создает пользователя
-- Задает 5 вопросов (family_structure, children_ages, primary_concern, support_preferred, previous_experience)
-- Сохраняет через PUT /users/{user_id}/quiz-profile
 
 ## Тесты (tests/)
 
@@ -402,5 +364,5 @@ chat_history хранит expert_score и user_score (1-5) с валидацие
 
 ---
 
-**Версия документа:** 2025-11-13  
-**Последнее обновление:** Анализ актуального состояния проекта
+**Версия документа:** 2026-01-14
+**Последнее обновление:** Добавлены репозитории content pipeline (sources, documents, content_chunks, chunk_embeddings_meta), убраны дубли API

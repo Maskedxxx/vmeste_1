@@ -385,5 +385,5 @@ SELECT 1 AS ready;
 
 ---
 
-**Версия документа:** 2025-11-13  
-**Схема БД:** db/init.sql (282 строки, 10 таблиц)
+**Версия документа:** 2026-01-12
+**Схема БД:** db/init.sql (11 таблиц: sources, documents, content_chunks, chunk_embeddings_meta, embedding_index_state, users, sessions, chat_history, user_memory, psychologist_content, style_examples)
