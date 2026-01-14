@@ -1,11 +1,13 @@
 # bot/telegram_bot.py
 # --- agent_meta ---
 # role: telegram-entry-bot
-# contract: Telegram-бот для тестирования пайплайна входа (entry) через /entry API
+# contract: Telegram-бот для входа, квиза, диагностики, плана недели и RAG-чата по темам
 # owner: backend-core
-# last_reviewed: 2025-11-19
+# last_reviewed: 2025-12-30
 # interfaces:
 #   - main() -> None
+#   - handle_chat_start() - запуск чата по теме (body/mind/sex)
+#   - handle_chat_message() - обработка сообщений в чате
 # --- /agent_meta ---
 
 """Простой Telegram-бот на aiogram, который проверяет пользователя через /entry API."""
@@ -48,6 +50,17 @@ DIAGNOSTIC_BLOCK_TITLES = {
 DIAGNOSTIC_BLOCK_ORDER = ["body", "mind", "sex"]
 WEEK_PLAN_CALLBACK = "week_plan_start"
 
+# Чат по темам
+CHAT_BODY_CALLBACK = "chat_body"
+CHAT_MIND_CALLBACK = "chat_mind"
+CHAT_SEX_CALLBACK = "chat_sex"
+CHAT_EXIT_CALLBACK = "chat_exit"
+CHAT_TOPIC_TITLES = {
+    "body": "🏃 Тело",
+    "mind": "🧠 Психика",
+    "sex": "💕 Сексология",
+}
+
 
 class EntryFlow(StatesGroup):
     """Состояния диалога входа."""
@@ -56,6 +69,7 @@ class EntryFlow(StatesGroup):
     ready = State()
     quiz_active = State()
     diagnostic_active = State()
+    chat_active = State()
 
 
 def _setup_logging() -> None:
@@ -172,6 +186,20 @@ def _api_get_memory(user_id: str) -> dict[str, Any] | None:
     return response.json()
 
 
+def _api_chat(user_id: str, message: str, topic: str) -> dict[str, Any]:
+    """Отправляет сообщение в AI-чат и возвращает ответ."""
+
+    settings = get_settings()
+    url = f"{settings.api_base_url.rstrip('/')}/chat"
+    payload = {"user_id": user_id, "message": message, "topic": topic}
+    logger.info("Отправляю сообщение в чат topic=%s для user_id=%s", topic, user_id)
+    response = requests.post(url, json=payload, timeout=60)
+    if response.status_code >= 400:
+        logger.error("Ошибка чата: %s", response.text)
+        raise RuntimeError("Не удалось получить ответ от AI.")
+    return response.json()
+
+
 def _build_ready_keyboard() -> InlineKeyboardMarkup:
     """Создает клавиатуру с действиями пользователя."""
 
@@ -179,8 +207,18 @@ def _build_ready_keyboard() -> InlineKeyboardMarkup:
     diagnostic_button = InlineKeyboardButton(text="Диагностика", callback_data=DIAGNOSTIC_CALLBACK)
     week_plan_button = InlineKeyboardButton(text="План на 7 дней", callback_data=WEEK_PLAN_CALLBACK)
     status_button = InlineKeyboardButton(text="Статус", callback_data=STATUS_CALLBACK)
+    # Кнопки чата по темам
+    chat_body = InlineKeyboardButton(text="🏃 Тело", callback_data=CHAT_BODY_CALLBACK)
+    chat_mind = InlineKeyboardButton(text="🧠 Психика", callback_data=CHAT_MIND_CALLBACK)
+    chat_sex = InlineKeyboardButton(text="💕 Секс", callback_data=CHAT_SEX_CALLBACK)
     return InlineKeyboardMarkup(
-        inline_keyboard=[[quiz_button], [diagnostic_button], [week_plan_button], [status_button]]
+        inline_keyboard=[
+            [chat_body, chat_mind, chat_sex],
+            [quiz_button],
+            [diagnostic_button],
+            [week_plan_button],
+            [status_button],
+        ]
     )
 
 
@@ -804,6 +842,113 @@ async def handle_week_plan_start(callback: CallbackQuery, state: FSMContext) -> 
     await _send_week_plan_summary(callback.message, plan_payload, used_tags)
 
 
+def _build_chat_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура для режима чата с кнопкой выхода."""
+
+    exit_button = InlineKeyboardButton(text="🚪 Выйти из чата", callback_data=CHAT_EXIT_CALLBACK)
+    return InlineKeyboardMarkup(inline_keyboard=[[exit_button]])
+
+
+async def handle_chat_start(callback: CallbackQuery, state: FSMContext) -> None:
+    """Запускает чат по выбранной теме."""
+
+    data = await state.get_data()
+    user_id: str | None = data.get("user_id")
+    if not user_id:
+        await callback.answer("Сначала отправьте email.", show_alert=True)
+        return
+
+    # Определяем тему по callback_data
+    topic_map = {
+        CHAT_BODY_CALLBACK: "body",
+        CHAT_MIND_CALLBACK: "mind",
+        CHAT_SEX_CALLBACK: "sex",
+    }
+    topic = topic_map.get(callback.data or "")
+    if not topic:
+        await callback.answer("Неизвестная тема.", show_alert=True)
+        return
+
+    topic_title = CHAT_TOPIC_TITLES.get(topic, topic)
+    await state.update_data(chat_topic=topic)
+    await state.set_state(EntryFlow.chat_active)
+    await callback.answer()
+
+    if callback.message:
+        await callback.message.answer(
+            f"Вы в режиме чата: {topic_title}\n\n"
+            "Задавайте вопросы, и AI ответит на основе материалов психолога.\n"
+            "Нажмите «Выйти из чата», чтобы вернуться в меню.",
+            reply_markup=_build_chat_keyboard(),
+        )
+
+
+async def handle_chat_message(message: Message, state: FSMContext) -> None:
+    """Обрабатывает сообщения пользователя в режиме чата."""
+
+    data = await state.get_data()
+    user_id: str | None = data.get("user_id")
+    topic: str | None = data.get("chat_topic")
+
+    if not user_id or not topic:
+        await message.answer("Сессия чата потеряна. Начните заново через /start.")
+        await state.set_state(EntryFlow.waiting_for_email)
+        return
+
+    text = (message.text or "").strip()
+    if not text:
+        await message.answer("Сообщение не может быть пустым.")
+        return
+
+    # Показываем что AI думает
+    thinking_msg = await message.answer("🤔 AI формирует ответ...")
+
+    try:
+        response = _api_chat(user_id, text, topic)
+    except RuntimeError as error:
+        logger.error("Ошибка чата: %s", error)
+        await thinking_msg.edit_text("Не удалось получить ответ. Попробуйте ещё раз.")
+        return
+
+    # Формируем ответ
+    ai_message = response.get("message", "Нет ответа.")
+    references = response.get("references") or []
+    follow_up = response.get("follow_up_question")
+
+    lines = [ai_message]
+
+    if references:
+        ref_lines = []
+        for ref in references[:3]:
+            preview = ref.get("preview", "")[:100]
+            if preview:
+                ref_lines.append(f"• {preview}...")
+        if ref_lines:
+            lines.append("\n📚 Материалы:\n" + "\n".join(ref_lines))
+
+    if follow_up:
+        lines.append(f"\n💬 {follow_up}")
+
+    await thinking_msg.edit_text(
+        "\n".join(lines),
+        reply_markup=_build_chat_keyboard(),
+    )
+
+
+async def handle_chat_exit(callback: CallbackQuery, state: FSMContext) -> None:
+    """Выход из режима чата."""
+
+    await state.update_data(chat_topic=None)
+    await state.set_state(EntryFlow.ready)
+    await callback.answer("Чат завершён.")
+
+    if callback.message:
+        await callback.message.answer(
+            "Вы вышли из чата. Выберите действие:",
+            reply_markup=_build_ready_keyboard(),
+        )
+
+
 async def _auto_enrich_profile_if_needed(message: Message, state: FSMContext, user_id: str) -> None:
     """Проверяет, обогащен ли профиль, и запускает обогащение при необходимости."""
 
@@ -832,10 +977,14 @@ def build_dispatcher() -> Dispatcher:
     dispatcher.callback_query.register(handle_diagnostic_start, F.data == DIAGNOSTIC_CALLBACK)
     dispatcher.callback_query.register(handle_diagnostic_next, F.data == DIAGNOSTIC_NEXT_CALLBACK)
     dispatcher.callback_query.register(handle_week_plan_start, F.data == WEEK_PLAN_CALLBACK)
-    dispatcher.callback_query.register(
-        handle_diagnostic_tag,
-        F.data.startswith(DIAGNOSTIC_TAG_PREFIX),
-    )
+    dispatcher.callback_query.register(handle_diagnostic_tag, F.data.startswith(DIAGNOSTIC_TAG_PREFIX),)
+    # Чат по темам
+    dispatcher.callback_query.register(handle_chat_start, F.data == CHAT_BODY_CALLBACK)
+    dispatcher.callback_query.register(handle_chat_start, F.data == CHAT_MIND_CALLBACK)
+    dispatcher.callback_query.register(handle_chat_start, F.data == CHAT_SEX_CALLBACK)
+    dispatcher.callback_query.register(handle_chat_exit, F.data == CHAT_EXIT_CALLBACK)
+    dispatcher.message.register(handle_chat_message, EntryFlow.chat_active, F.text)
+    # Квиз и fallback
     dispatcher.message.register(handle_quiz_answer, EntryFlow.quiz_active, F.text)
     dispatcher.message.register(handle_fallback)
     return dispatcher
