@@ -1,61 +1,42 @@
 # app/services/week_plan_agent.py
 # --- agent_meta ---
 # role: week-plan-agent
-# contract: подбирает материалы по тегам и строит план на 7 дней
+# contract: строит 7-дневный план на основе профиля, квиза и диагностики
 # owner: backend-core
-# last_reviewed: 2025-11-11
+# last_reviewed: 2025-11-19
 # interfaces:
-#   - generate_week_plan(user_id: UUID, tags: list[str]) -> WeekPlan
+#   - run_week_plan_with_cache(user_id: UUID, tags: list[str] | None, force: bool)
 # --- /agent_meta ---
 
-"""Агент, создающий план на 7 дней на основе профиля и тегов проблем."""
+"""Агент, создающий план на 7 дней на основе полного контекста пользователя."""
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
-from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Iterable, Sequence
+from typing import Any, Sequence
 from uuid import UUID
 
 from openai import OpenAI
 
-from app.db.connection import fetch_all
 from app.db.repositories import user_memory, users
-from app.models import PlanItem, WeekPlan, UserProfileModel
+from app.models import WeekPlan, UserProfileModel
+from app.models.diagnostic import DiagnosticBundle
 from config import get_settings
 
 
 logger = logging.getLogger("vmeste.services.week_plan_agent")
 
 SYSTEM_PROMPT = (
-    "Ты коуч-психолог платформы «Вместе». На основе профиля пользователя и списка доступных "
-    "материалов составь подробный план на 7 дней. Каждый день должен ссылаться на конкретный "
-    "контент (content_id) и описывать цель и краткую инструкцию. Можно повторять материалы, "
-    "но с разным акцентом. Учти теги проблемы и стадии пользователя."
+    "Ты коуч-психолог платформы «Вместе». На основе профиля пользователя, его квизовых ответов, "
+    "выбранных тегов и результатов диагностики составь подробный, но простой план на 7 дней. "
+    "Каждый день должен содержать одну практику или задачу, которую можно выполнить самостоятельно: "
+    "дыхательные техники, ведение дневника, социальные шаги, мягкие физические упражнения, встречи "
+    "с врачами и т.д. Избегай упоминаний платного контента и сложных инструментов."
 )
-
-
-@dataclass
-class ContentItem:
-    content_id: str
-    title: str
-    summary: str
-    topic: str | None
-    content_type: str | None
-    tags: list[str]
-
-    def to_payload(self) -> dict[str, Any]:
-        return {
-            "content_id": self.content_id,
-            "title": self.title,
-            "summary": self.summary,
-            "topic": self.topic,
-            "content_type": self.content_type,
-            "tags": self.tags,
-        }
 
 
 def _load_profile(user_id: UUID) -> UserProfileModel:
@@ -69,78 +50,35 @@ def _load_profile(user_id: UUID) -> UserProfileModel:
         return UserProfileModel()
 
 
-def _normalize_tags(tags: Iterable[str] | None) -> list[str]:
+def _normalize_tags(tags: Sequence[str] | None) -> list[str]:
     normalized: list[str] = []
     if not tags:
         return normalized
     for tag in tags:
         if not tag:
             continue
-        value = str(tag).strip()
-        if not value:
+        value = str(tag).strip().lower()
+        if not value or value in normalized:
             continue
-        normalized.append(value.lower())
+        normalized.append(value)
     return normalized
 
 
-def _fetch_catalog() -> list[ContentItem]:
-    rows = fetch_all(
-        """
-        SELECT
-            content_id,
-            title,
-            COALESCE(summary, description, '') AS summary,
-            topic,
-            content_type,
-            tags
-        FROM psychologist_content
-        WHERE available = TRUE
-          AND is_deleted = FALSE
-        """
-    )
-    catalog: list[ContentItem] = []
-    for row in rows:
-        catalog.append(
-            ContentItem(
-                content_id=str(row["content_id"]),
-                title=row["title"],
-                summary=row["summary"] or "",
-                topic=row.get("topic"),
-                content_type=row.get("content_type"),
-                tags=_normalize_tags(row.get("tags")),
-            )
-        )
-    return catalog
+def _gather_diagnostic_tags(bundle: DiagnosticBundle | None) -> list[str]:
+    if bundle is None:
+        return []
+    tags: list[str] = []
+    for block in (bundle.body, bundle.mind, bundle.sex):
+        for tag in block.tags:
+            normalized = tag.strip().lower()
+            if normalized and normalized not in tags:
+                tags.append(normalized)
+    return tags
 
 
-def select_content_by_tags(tags: Sequence[str], limit: int = 12) -> list[ContentItem]:
-    target = set(_normalize_tags(tags))
-    catalog = _fetch_catalog()
-    logger.info("Каталог материалов: %s записей, теги запроса: %s", len(catalog), list(target))
-    scored: list[tuple[int, ContentItem]] = []
-
-    for item in catalog:
-        item_tags = set(item.tags)
-        score = len(target & item_tags) if target else 1
-        if score == 0 and target:
-            continue
-        scored.append((score, item))
-
-    if not scored and catalog:
-        scored = [(0, item) for item in catalog]
-
-    scored.sort(key=lambda x: (-x[0], x[1].title))
-    selected = [item for _, item in scored[:limit]]
-    logger.info(
-        "Подбор контента: выбрано %s материалов: %s",
-        len(selected),
-        [item.content_id for item in selected],
-    )
-    return selected
-
-
-def _normalized_eq(a: Sequence[str], b: Sequence[str]) -> bool:
-    return _normalize_tags(a) == _normalize_tags(b)
+def _build_context_hash(payload: dict[str, Any]) -> str:
+    serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
 class WeekPlanAgent:
@@ -151,17 +89,22 @@ class WeekPlanAgent:
         self._client = client or OpenAI()
         self._model = model_name or getattr(settings, "openai_model", "gpt-4.1-mini")
 
-    def generate_plan(self, profile: UserProfileModel, materials: list[ContentItem]) -> WeekPlan:
-        if not materials:
-            raise RuntimeError("Нет материалов для построения плана")
+    def generate_plan(
+        self,
+        *,
+        profile: UserProfileModel,
+        quiz_payload: dict[str, Any] | None,
+        diagnostic: DiagnosticBundle,
+        focus_tags: Sequence[str],
+    ) -> WeekPlan:
         payload = {
             "profile": profile.model_dump(mode="json"),
-            "materials": [item.to_payload() for item in materials],
+            "quiz_profile": quiz_payload,
+            "diagnostic": diagnostic.model_dump(mode="json"),
+            "focus_tags": list(focus_tags),
             "instructions": (
-                "Сформируй список ровно из 7 элементов. Каждый элемент должен использовать один "
-                "из материалов из списка. Если материалов меньше 7, повторяй их, но меняй вклад "
-                "и подход. В поле goal отрази, какую проблему решает день, а в instructions опиши, "
-                "как выполнять задачу."
+                "Сформируй 7 последовательных дней. Для каждого дня задай: title, goal, instructions, tags, focus_area. "
+                "Через неделю пользователь должен почувствовать облегчение по ключевым симптомам."
             ),
         }
         messages = [
@@ -172,7 +115,7 @@ class WeekPlanAgent:
             model=self._model,
             messages=messages,
             response_format=WeekPlan,
-            temperature=0.3,
+            temperature=0.35,
         )
         plan = completion.choices[0].message.parsed
         if plan is None:
@@ -180,47 +123,60 @@ class WeekPlanAgent:
         return plan
 
 
-def generate_week_plan(user_id: UUID, tags: Sequence[str]) -> WeekPlan:
-    profile = _load_profile(user_id)
-    materials = select_content_by_tags(tags, limit=12)
-    agent = WeekPlanAgent()
-    logger.info("Запуск week plan agent для user_id=%s (материалов=%s)", user_id, len(materials))
-    plan = agent.generate_plan(profile, materials)
-    return plan
-
-
 def run_week_plan_with_cache(
     user_id: UUID,
-    tags: Sequence[str],
+    tags: Sequence[str] | None = None,
     *,
     force: bool = False,
-) -> tuple[WeekPlan, bool]:
+) -> tuple[WeekPlan, bool, list[str]]:
     """Возвращает недельный план, используя кэш при наличии."""
 
+    profile = _load_profile(user_id)
+    quiz_profile = user_memory.get_quiz_profile(user_id)
+    diagnostic_raw = user_memory.get_diagnostic_bundle(user_id)
+    if diagnostic_raw is None:
+        raise ValueError("Диагностика ещё не выполнена")
+    diagnostic = DiagnosticBundle.model_validate(diagnostic_raw)
+
     normalized_tags = _normalize_tags(tags)
-    if not normalized_tags:
-        raise ValueError("Нужно указать хотя бы один тег для подбора контента")
+    derived_tags = normalized_tags or _gather_diagnostic_tags(diagnostic)
+    if not derived_tags and profile.recommended_focus:
+        derived_tags = _normalize_tags(profile.recommended_focus)
+
+    quiz_payload = quiz_profile.model_dump(mode="json") if quiz_profile else None
+    context_payload = {
+        "profile": profile.model_dump(mode="json"),
+        "quiz": quiz_payload,
+        "diagnostic": diagnostic.model_dump(mode="json"),
+        "tags": derived_tags,
+    }
+    context_hash = _build_context_hash(context_payload)
 
     cached = user_memory.get_week_plan(user_id)
-    if cached and not force:
-        cached_tags = _normalize_tags(cached.get("tags"))
-        if _normalized_eq(cached_tags, normalized_tags):
-            logger.info("Используем сохранённый план user_id=%s", user_id)
-            plan_payload = cached.get("plan")
-            if not isinstance(plan_payload, dict):
-                logger.warning("Сохранённый план повреждён, пересоздаём user_id=%s", user_id)
-            else:
-                return WeekPlan.model_validate(plan_payload), True
+    if cached and not force and cached.get("context_hash") == context_hash:
+        plan_payload = cached.get("plan")
+        if isinstance(plan_payload, dict):
+            logger.info("Возвращаем недельный план из кэша user_id=%s", user_id)
+            return WeekPlan.model_validate(plan_payload), True, list(cached.get("tags", []))
+        logger.warning("Повреждённый кэш плана user_id=%s, пересоздаём", user_id)
 
-    plan = generate_week_plan(user_id, normalized_tags)
+    agent = WeekPlanAgent()
+    plan = agent.generate_plan(
+        profile=profile,
+        quiz_payload=quiz_payload,
+        diagnostic=diagnostic,
+        focus_tags=derived_tags,
+    )
+
     payload = {
-        "tags": normalized_tags,
+        "tags": derived_tags,
         "plan": plan.model_dump(mode="json"),
         "generated_at": datetime.now(timezone.utc).isoformat(),
+        "context_hash": context_hash,
     }
     user_memory.upsert_week_plan(user_id, payload)
     logger.info("Сохранён новый недельный план user_id=%s", user_id)
-    return plan, False
+    return plan, False, derived_tags
 
 
 def _parse_args() -> argparse.Namespace:
@@ -234,10 +190,10 @@ def _parse_args() -> argparse.Namespace:
 if __name__ == "__main__":
     args = _parse_args()
     tags = [tag.strip() for tag in args.tags.split(",") if tag.strip()]
-    plan = generate_week_plan(UUID(args.user_id), tags)
+    plan, _ = run_week_plan_with_cache(UUID(args.user_id), tags)
     payload = plan.model_dump(mode="json")
     if args.as_json:
         print(json.dumps(payload, ensure_ascii=False, indent=2))
     else:
         for item in plan.days:
-            print(f"День {item.day}: {item.title} ({item.content_id}) — {item.goal}")
+            print(f"День {item.day}: {item.title} — {item.goal}")

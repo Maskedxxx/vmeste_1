@@ -20,11 +20,14 @@ class PlanItem(BaseModel):
     """Один день плана."""
 
     day: int = Field(..., ge=1, le=7, description="Номер дня (1-7).")
-    content_id: str = Field(..., description="Материал psychologist_content.")
-    title: str = Field(..., description="Название активности/материала.")
+    title: str = Field(..., description="Название упражнения или практики.")
     goal: str = Field(..., description="Зачем выполнять этот шаг.")
     instructions: str = Field(..., description="Краткая инструкция или сценарий выполнения.")
     tags: list[str] = Field(default_factory=list, description="Теги, связанные с задачей.")
+    focus_area: str | None = Field(
+        default=None,
+        description="Опциональное направление (тело/психика/отношения и т.д.).",
+    )
 
 
 class WeekPlan(BaseModel):

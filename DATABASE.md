@@ -226,10 +226,42 @@ style_examples (независимая таблица)
     "sex": { "analysis": "...", "tags": [] },
     "generated_at": "ISO8601"
   },
+  "diagnostic_recommendations": [
+    {
+      "block": "body|mind|sex",
+      "recommendation": {
+        "offer": { "content_id": "...", "title": "...", "reason": "..." },
+        "tone_message": "...",
+        "next_question": "..."
+      },
+      "content": {
+        "content_id": "...",
+        "title": "...",
+        "summary": "...",
+        "url": "...",
+        "topic": "...",
+        "content_type": "...",
+        "tags": []
+      }
+    }
+  ],
   "week_plan": {
     "tags": ["стресс", "усталость"],
-    "plan": { "days": [ { "day": 1, "content_id": "...", "title": "...", "goal": "...", "instructions": "...", "tags": [] }, ... ] },
-    "generated_at": "ISO8601"
+    "plan": {
+      "days": [
+        {
+          "day": 1,
+          "title": "...",
+          "goal": "...",
+          "instructions": "...",
+          "tags": [],
+          "focus_area": "тело|психика|отношения"
+        },
+        ...
+      ]
+    },
+    "generated_at": "ISO8601",
+    "context_hash": "sha256..."
   }
 }
 ```
@@ -353,5 +385,5 @@ SELECT 1 AS ready;
 
 ---
 
-**Версия документа:** 2025-11-13  
-**Схема БД:** db/init.sql (282 строки, 10 таблиц)
+**Версия документа:** 2026-01-12
+**Схема БД:** db/init.sql (11 таблиц: sources, documents, content_chunks, chunk_embeddings_meta, embedding_index_state, users, sessions, chat_history, user_memory, psychologist_content, style_examples)

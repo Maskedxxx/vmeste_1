@@ -22,11 +22,13 @@ from app.db.models import (
 )
 from app.db.repositories import chat_history, sessions, user_memory, users
 from app.models.diagnostic import DiagnosticBundle
+from app.models.recommendation import BlockRecommendation
 from app.models.quiz import QuizAnswer as QuizAnswerModel, QuizQuestion
 from app.models.week_plan import WeekPlan
-from app.services.diagnostic_agent import run_diagnostic_with_cache
+from app.services.diagnostic_workflow import run_diagnostic_with_recommendations
 from app.services.profile_enrichment import EnsureProfileResult, ensure_profile_for_user
 from app.services.quiz_service import DEFAULT_QUIZ_VERSION, get_quiz_questions, run_quiz_for_user, validate_answers
+from app.services.rag_chat_agent import run_rag_chat, TopicType
 from app.services.week_plan_agent import run_week_plan_with_cache
 
 
@@ -135,12 +137,14 @@ class DiagnosticResponse(BaseModel):
 
     bundle: DiagnosticBundle
     from_cache: bool
+    recommendations: list[BlockRecommendation]
+    recommendations_from_cache: bool
 
 
 class WeekPlanRequest(BaseModel):
     """Параметры запуска генерации недельного плана."""
 
-    selected_tags: list[str] = Field(..., min_length=1)
+    selected_tags: list[str] | None = Field(default=None, description="Опциональные теги от пользователя.")
     force: bool = False
 
 
@@ -149,7 +153,7 @@ class WeekPlanResponse(BaseModel):
 
     plan: WeekPlan
     from_cache: bool
-    tags: list[str]
+    tags: list[str] = Field(default_factory=list)
 
 
 class EntryRequest(BaseModel):
@@ -164,6 +168,32 @@ class EntryResponse(BaseModel):
     user: User
     is_new: bool
     quiz_completed: bool = False
+
+
+class RagChatRequest(BaseModel):
+    """Запрос на чат с AI по теме."""
+
+    user_id: UUID
+    message: str = Field(..., min_length=1, max_length=2000)
+    topic: TopicType
+
+
+class RagChatReference(BaseModel):
+    """Ссылка на материал психолога."""
+
+    doc_id: str
+    preview: str
+    topic: str | None = None
+
+
+class RagChatResponse(BaseModel):
+    """Ответ AI-чата."""
+
+    message: str
+    tone: str
+    references: list[RagChatReference]
+    follow_up_question: str
+    session_id: UUID
 
 
 @app.get("/health", response_model=HealthResponse, tags=["service"])
@@ -337,8 +367,16 @@ def run_diagnostic_endpoint(user_id: UUID, payload: DiagnosticRequest) -> Diagno
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Profile is empty. Run enrichment first.",
         )
-    bundle, from_cache = run_diagnostic_with_cache(user_id=user_id, force=payload.force)
-    return DiagnosticResponse(bundle=bundle, from_cache=from_cache)
+    bundle, diag_from_cache, recommendations, rec_from_cache = run_diagnostic_with_recommendations(
+        user_id=user_id,
+        force=payload.force,
+    )
+    return DiagnosticResponse(
+        bundle=bundle,
+        from_cache=diag_from_cache,
+        recommendations=recommendations,
+        recommendations_from_cache=rec_from_cache,
+    )
 
 
 @app.post(
@@ -358,7 +396,7 @@ def run_week_plan_endpoint(user_id: UUID, payload: WeekPlanRequest) -> WeekPlanR
         )
 
     try:
-        plan, from_cache = run_week_plan_with_cache(
+        plan, from_cache, used_tags = run_week_plan_with_cache(
             user_id=user_id,
             tags=payload.selected_tags,
             force=payload.force,
@@ -366,7 +404,88 @@ def run_week_plan_endpoint(user_id: UUID, payload: WeekPlanRequest) -> WeekPlanR
     except ValueError as error:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
 
-    return WeekPlanResponse(plan=plan, from_cache=from_cache, tags=payload.selected_tags)
+    return WeekPlanResponse(plan=plan, from_cache=from_cache, tags=used_tags)
+
+
+@app.post("/chat", response_model=RagChatResponse, tags=["chat"])
+def rag_chat_endpoint(payload: RagChatRequest) -> RagChatResponse:
+    """
+    Чат с AI по выбранной теме (body/mind/sex).
+
+    Использует RAG-агента для поиска релевантного контента психолога
+    и генерации персонализированного ответа.
+    """
+    user = users.get_by_id(payload.user_id)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    # Получаем или создаём активную сессию
+    session = sessions.get_active_session(payload.user_id)
+    if session is None:
+        session = sessions.create_session(
+            SessionCreate(
+                user_id=payload.user_id,
+                mode=f"chat_{payload.topic}",
+                state_json={"topic": payload.topic},
+            )
+        )
+        logger.info("Создана новая сессия %s для чата topic=%s", session.session_id, payload.topic)
+
+    # Сохраняем сообщение пользователя
+    user_msg = ChatMessageCreate(
+        session_id=session.session_id,
+        user_id=payload.user_id,
+        sender="user",
+        message_type="text",
+        payload={"text": payload.message, "topic": payload.topic},
+        request_timestamp=datetime.now(timezone.utc),
+    )
+    chat_history.add_message(user_msg)
+
+    # Вызываем RAG-агента
+    try:
+        reply = run_rag_chat(
+            user_id=payload.user_id,
+            user_message=payload.message,
+            topic_filter=payload.topic,
+        )
+    except Exception as error:
+        logger.exception("Ошибка RAG-агента для user_id=%s", payload.user_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"RAG agent error: {error}",
+        ) from error
+
+    # Сохраняем ответ ассистента
+    assistant_msg = ChatMessageCreate(
+        session_id=session.session_id,
+        user_id=payload.user_id,
+        sender="assistant",
+        message_type="text",
+        payload={
+            "text": reply.message,
+            "tone": reply.tone,
+            "references": [ref.model_dump() for ref in reply.references],
+            "follow_up_question": reply.follow_up_question,
+        },
+        response_timestamp=datetime.now(timezone.utc),
+    )
+    chat_history.add_message(assistant_msg)
+
+    return RagChatResponse(
+        message=reply.message,
+        tone=reply.tone,
+        references=[
+            RagChatReference(
+                doc_id=ref.doc_id,
+                preview=ref.preview,
+                topic=ref.topic,
+            )
+            for ref in reply.references
+        ],
+        follow_up_question=reply.follow_up_question,
+        session_id=session.session_id,
+    )
 
 
 @app.post("/sessions", response_model=Session, tags=["sessions"], status_code=status.HTTP_201_CREATED)
@@ -480,9 +599,12 @@ def update_quiz_profile(user_id: UUID, payload: QuizProfileUpdate) -> QuizProfil
 if __name__ == "__main__":
     import uvicorn
 
+    from config import get_settings
+
+    settings = get_settings()
     uvicorn.run(
         "app.main:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=True,
+        host=settings.api_host,
+        port=settings.api_port,
+        reload=settings.app_env == "development",
     )

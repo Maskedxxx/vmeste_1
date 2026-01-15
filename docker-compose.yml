@@ -1,3 +1,7 @@
+# docker-compose.yml
+# Локальная разработка: полный стек (API + ChromaDB + PostgreSQL)
+# Запуск: docker-compose up --build
+
 services:
   api:
     build: .
@@ -5,7 +9,7 @@ services:
     env_file:
       - .env
     ports:
-      - "${API_PORT:-8000}:8000"
+      - "${API_EXTERNAL_PORT:-8000}:8000"
     depends_on:
       - chroma
       - postgres
@@ -15,9 +19,10 @@ services:
     container_name: vmeste-chroma
     restart: unless-stopped
     ports:
-      - "${CHROMA_PORT:-8001}:8000"
+      - "${CHROMA_EXTERNAL_PORT:-8001}:8000"
     volumes:
-      - chroma_data:/chroma/.chroma
+      # ВАЖНО: ChromaDB сохраняет данные в /data, не в /chroma/.chroma!
+      - chroma_data:/data
 
   postgres:
     image: postgres:16-alpine
@@ -28,7 +33,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-vmeste_password}
       POSTGRES_HOST_AUTH_METHOD: trust
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "${POSTGRES_EXTERNAL_PORT:-5433}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro

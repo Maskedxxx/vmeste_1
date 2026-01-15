@@ -1,9 +1,11 @@
 Legacy/
 .DS_Store
 tmp_pdf.txt
-data/
+data/*
+!data/test_data/
 scripts/
 !scripts/conversation_runner.py
+!scripts/content_pipeline.py
 
 # Personal notes
 docs/
@@ -23,6 +25,7 @@ venv/
 # Environment files
 .env
 .env.*
+!.env.example
 
 # Tooling
 .pytest_cache/
@@ -37,3 +40,11 @@ htmlcov/
 # IDE
 .idea/
 .vscode/
+*.code-workspace
+
+# AI tools
+.gemini/
+.claude/
+
+# Temp working folder
+temp_gdrive/

@@ -20,6 +20,7 @@ class ContentCandidate(BaseModel):
     content_id: str = Field(..., description="Идентификатор записи psychologist_content.")
     title: str = Field(..., description="Название материала, отображаемое пользователю.")
     summary: str = Field(..., description="Краткое описание пользы или формата.")
+    url: str | None = Field(default=None, description="Ссылка на материал или лендинг.")
     topic: str | None = Field(default=None, description="Основная тема материала.")
     content_type: str | None = Field(default=None, description="Тип контента: lesson/webinar/post/etc.")
     tags: list[str] = Field(default_factory=list, description="Теги из таблицы psychologist_content.")
@@ -57,3 +58,11 @@ class RecommendationReply(BaseModel):
         ...,
         description="Один короткий вопрос, чтобы поддержать контакт после рекомендации.",
     )
+
+
+class BlockRecommendation(BaseModel):
+    """Рекомендация контента для конкретного диагностического блока."""
+
+    block: Literal["body", "mind", "sex"] = Field(..., description="Блок диагностики.")
+    recommendation: RecommendationReply = Field(..., description="Ответ агента рекомендаций.")
+    content: ContentCandidate = Field(..., description="Карточка контента из каталога.")

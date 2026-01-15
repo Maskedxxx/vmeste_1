@@ -15,6 +15,14 @@ from app.models.recommendation import ContentCandidate, RecommendationOffer, Rec
 from app.models.therapy import TherapyReply
 from app.models.user_profile import UserProfileModel
 from app.models.week_plan import PlanItem, WeekPlan
+from app.models.content_pipeline import (
+    ContentInput,
+    ContentInputBatch,
+    PipelineResult,
+    PipelineBatchResult,
+    TopicType,
+    ContentType,
+)
 
 __all__ = [
     "ContentCandidate",
@@ -36,4 +44,11 @@ __all__ = [
     "DiagnosticBundle",
     "PlanItem",
     "WeekPlan",
+    # Content Pipeline
+    "ContentInput",
+    "ContentInputBatch",
+    "PipelineResult",
+    "PipelineBatchResult",
+    "TopicType",
+    "ContentType",
 ]

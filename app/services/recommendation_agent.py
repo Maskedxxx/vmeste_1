@@ -21,7 +21,7 @@ from uuid import UUID
 from openai import OpenAI
 
 from app.db.repositories import psychologist_content, users
-from app.models.recommendation import ContentCandidate, RecommendationReply
+from app.models.recommendation import BlockRecommendation, ContentCandidate, RecommendationReply
 from app.models.user_profile import UserProfileModel
 from config import get_settings
 
@@ -34,6 +34,12 @@ SYSTEM_PROMPT = (
     "переданными материалами психолога и предложить один наиболее подходящий вариант. "
     "Обязательно используй заданный тон общения и объясни, почему материал поможет."
 )
+
+BLOCK_FOCUS_HINTS: dict[str, str] = {
+    "body": "Сконцентрируйся на телесных практиках, питании, режиме сна, упражнениях и восстановлении.",
+    "mind": "Выбирай материалы про психологию, эмоции, выгорание, тревожность и когнитивные техники.",
+    "sex": "Обрати внимание на темы близости, сексуального здоровья, отношений и доверия.",
+}
 
 
 class RecommendationAgentService:
@@ -50,6 +56,7 @@ class RecommendationAgentService:
         profile: UserProfileModel,
         candidates: Sequence[ContentCandidate],
         tone_voice: str,
+        focus_context: dict[str, object] | None = None,
     ) -> RecommendationReply:
         """Возвращает персонализированную рекомендацию."""
 
@@ -58,7 +65,12 @@ class RecommendationAgentService:
             logger.error(msg)
             raise ValueError(msg)
 
-        messages = self._build_messages(profile=profile, candidates=candidates, tone_voice=tone_voice)
+        messages = self._build_messages(
+            profile=profile,
+            candidates=candidates,
+            tone_voice=tone_voice,
+            focus_context=focus_context,
+        )
         logger.info("Отправляю запрос к LLM для агента рекомендаций (кандидатов=%s)", len(candidates))
         completion = self._client.chat.completions.parse(
             model=self._model_name,
@@ -79,10 +91,11 @@ class RecommendationAgentService:
         profile: UserProfileModel,
         candidates: Sequence[ContentCandidate],
         tone_voice: str,
+        focus_context: dict[str, object] | None = None,
     ) -> list[dict[str, str]]:
         """Готовит сообщения для LLM."""
 
-        user_payload = {
+        user_payload: dict[str, object] = {
             "tone_voice": tone_voice,
             "user_profile": profile.model_dump(mode="json"),
             "candidates": [candidate.model_dump(mode="json") for candidate in candidates],
@@ -91,6 +104,8 @@ class RecommendationAgentService:
                 "Если кандидаты слабо подходят, всё равно выбери ближайший и объясни, почему он полезен."
             ),
         }
+        if focus_context:
+            user_payload["focus_context"] = focus_context
         return [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
@@ -141,6 +156,7 @@ def _load_candidates(limit: int) -> list[ContentCandidate]:
             content_id=str(row["content_id"]),
             title=row["title"],
             summary=row.get("summary") or metadata.get("summary", ""),
+            url=row.get("url"),
             topic=row.get("topic"),
             content_type=row.get("content_type"),
             tags=row.get("tags") or [],
@@ -172,6 +188,50 @@ def run_content_recommendation(
     service = service or RecommendationAgentService()
     reply = service.generate_reply(profile=profile, candidates=candidates, tone_voice=tone_voice)
     return reply
+
+
+def generate_block_recommendations(
+    *,
+    user_id: UUID,
+    blocks: Sequence[str],
+    tone_voice: str | None = None,
+    limit: int = 6,
+) -> list[BlockRecommendation]:
+    """Генерирует по одному офферу для переданных диагностических блоков."""
+
+    profile = _load_profile(user_id)
+    tone = tone_voice or profile.tov_style_tag or "gentle"
+    candidates = _load_candidates(limit)
+    if not candidates:
+        raise RuntimeError("В таблице psychologist_content нет доступных материалов")
+
+    service = RecommendationAgentService()
+    results: list[BlockRecommendation] = []
+    used_ids: set[str] = set()
+    for block in blocks:
+        available_candidates = [c for c in candidates if c.content_id not in used_ids]
+        if not available_candidates:
+            available_candidates = candidates
+        focus_context = {
+            "block": block,
+            "instructions": BLOCK_FOCUS_HINTS.get(block, ""),
+        }
+        reply = service.generate_reply(
+            profile=profile,
+            candidates=available_candidates,
+            tone_voice=tone,
+            focus_context=focus_context,
+        )
+        used_ids.add(reply.offer.content_id)
+        content = next((c for c in candidates if c.content_id == reply.offer.content_id), available_candidates[0])
+        results.append(
+            BlockRecommendation(
+                block=block,
+                recommendation=reply,
+                content=content,
+            )
+        )
+    return results
 
 
 if __name__ == "__main__":
